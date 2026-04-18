@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>暗記カード学習アプリ</title>
+  <style>
+    /* 共通変数・テーマ設定 */
+    :root {
+      --bg-color: #f3f4f6; --text-color: #1f2937; --card-bg: #ffffff;
+      --primary-color: #3b82f6; --primary-hover: #2563eb;
+      --danger-color: #ef4444; --danger-hover: #dc2626;
+      --success-color: #10b981; --success-hover: #059669;
+      --warning-color: #f59e0b; --warning-hover: #d97706;
+      --border-color: #e5e7eb;
+      --shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+    }[data-theme="dark"] {
+      --bg-color: #111827; --text-color: #f3f4f6; --card-bg: #1f2937;
+      --primary-color: #60a5fa; --primary-hover: #3b82f6;
+      --border-color: #374151;
+      --shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.5);
+    }
+
+    * { box-sizing: border-box; }
+    body { font-family: 'Helvetica Neue', Arial, sans-serif; background-color: var(--bg-color); color: var(--text-color); margin: 0; padding: 15px; transition: background-color 0.3s; }
+    
+    .screen { display: none; max-width: 800px; margin: 0 auto; animation: fadeIn 0.3s ease; }
+    .screen.active { display: block; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+    h1, h2, h3 { text-align: center; }
+
+    button { cursor: pointer; padding: 12px 10px; border: none; border-radius: 8px; font-size: 0.95rem; font-weight: bold; background: var(--card-bg); color: var(--text-color); border: 1px solid var(--border-color); box-shadow: 0 1px 2px rgba(0,0,0,0.05); transition: all 0.2s; display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1.2; }
+    button:hover:not(:disabled) { transform: translateY(-1px); box-shadow: var(--shadow); }
+    button:active:not(:disabled) { transform: translateY(1px); }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    .shortcut-key { font-size: 0.75rem; opacity: 0.7; margin-top: 4px; font-weight: normal; }
+
+    .primary-btn { background: var(--primary-color); color: white; border: none; }
+    .primary-btn:hover:not(:disabled) { background: var(--primary-hover); }
+    .danger-btn { background: var(--danger-color); color: white; border: none; }
+    .danger-btn:hover:not(:disabled) { background: var(--danger-hover); }
+    .success-btn { background: var(--success-color); color: white; border: none; font-size: 1.1rem; }
+    .success-btn:hover:not(:disabled) { background: var(--success-hover); }
+    .warning-btn { background: var(--warning-color); color: white; border: none; }
+
+    /* ★自己評価フラグボタン */
+    .flag-btn { background: transparent; border: 1px solid var(--border-color); color: var(--text-color); padding: 6px 10px; border-radius: 20px; font-size: 0.85rem; cursor: pointer; transition: 0.2s; flex-direction: row; gap: 5px; box-shadow: none; }
+    .flag-btn:hover { background: var(--border-color); }
+    .flag-btn[data-flag="uneasy"].active { background: #fef08a; border-color: #facc15; color: #854d0e; }
+    .flag-btn[data-flag="mistake"].active { background: #fecaca; border-color: #f87171; color: #991b1b; }
+    [data-theme="dark"] .flag-btn[data-flag="uneasy"].active { background: #854d0e; border-color: #facc15; color: #fef08a; }
+    [data-theme="dark"] .flag-btn[data-flag="mistake"].active { background: #991b1b; border-color: #f87171; color: #fecaca; }
+
+    .menu { display: grid; gap: 15px; grid-template-columns: 1fr; margin-top: 20px; }
+    @media (min-width: 600px) { .menu { grid-template-columns: 1fr 1fr; } }
+    .menu-btn { font-size: 1.1rem; padding: 20px; flex-direction: row; gap: 10px; }
+
+    .card-area { background: var(--card-bg); padding: 20px; border-radius: 16px; box-shadow: var(--shadow); margin: 20px 0; height: 420px; overflow-y: auto; text-align: center; display: flex; flex-direction: column; }
+    .card-top-row { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 10px; flex-wrap: wrap; gap: 10px;}
+    #card-question { font-size: 2rem; margin: auto 0; }
+    
+    .session-header { display: flex; justify-content: space-between; font-weight: bold; padding: 0 10px; font-size: 1.1rem; }
+    .session-controls { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr 1fr; gap: 8px; }
+    
+    .badge { display: inline-block; padding: 6px 12px; font-size: 0.85rem; background: var(--border-color); border-radius: 20px; margin: 0 4px; }
+    #user-answer-input { width: 100%; padding: 12px; margin: 15px 0; font-size: 1.2rem; border: 2px solid var(--border-color); border-radius: 8px; text-align: center; display: block; background: var(--bg-color); color: var(--text-color); }
+
+    .table-responsive { overflow-x: auto; margin-bottom: 20px; border-radius: 8px; box-shadow: var(--shadow); }
+    table { width: 100%; border-collapse: collapse; min-width: 700px; background: var(--card-bg); }
+    th, td { border: 1px solid var(--border-color); padding: 10px; text-align: left; font-size: 0.95rem; vertical-align: middle; }
+    th { background: var(--bg-color); position: sticky; top: 0; z-index: 1;}
+
+    .config-form label { display: block; margin-bottom: 10px; font-weight: bold; }
+    .config-form select, .config-form input[type="file"] { width: 100%; padding: 10px; margin-top: 5px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--card-bg); color: var(--text-color); font-size: 1rem; }
+    .settings-section { margin-bottom: 20px; padding: 20px; background: var(--card-bg); border-radius: 12px; box-shadow: var(--shadow); }
+    .checkbox-group { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 5px; margin-bottom: 15px; }
+    .checkbox-label { display: flex; align-items: center; gap: 5px; background: var(--bg-color); padding: 5px 10px; border-radius: 20px; font-size: 0.9rem; cursor: pointer; border: 1px solid var(--border-color); }
+    .checkbox-label:hover { border-color: var(--primary-color); }
+
+    .stat-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 20px; }
+    .stat-card { background: var(--card-bg); padding: 20px; border-radius: 12px; box-shadow: var(--shadow); text-align: center; }
+    .stat-card h4 { margin: 0 0 10px; font-size: 1rem; color: #6b7280; }
+    .stat-card .value { font-size: 1.8rem; font-weight: bold; color: var(--primary-color); }
+
+    .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); align-items: center; justify-content: center; z-index: 1000; padding: 20px; }
+    .modal.active { display: flex; }
+    .modal-content { background: var(--card-bg); padding: 30px; border-radius: 16px; text-align: center; max-width: 400px; width: 100%; box-shadow: var(--shadow); }
+    .modal-actions { display: flex; gap: 10px; justify-content: center; margin-top: 20px; }
+  </style>
+</head>
+<body data-theme="light">
+
+  <div id="screen-home" class="screen active">
+    <h1>暗記カード学習アプリ</h1>
+    <div class="menu">
+      <button class="menu-btn" data-target="config" data-entry="normal">📖 通常学習</button>
+      <button class="menu-btn" data-target="config" data-entry="wrong">⚠️ 間違いを見直し</button>
+      <button class="menu-btn" data-target="config" data-entry="weak">📉 苦手な問題</button>
+      <button class="menu-btn" data-target="config" data-entry="stale">⏳ 最近未回答</button>
+      <button class="menu-btn" id="btn-go-analytics" style="background: var(--success-color); color: white;">📊 学習分析</button>
+      <button class="menu-btn" data-target="settings">⚙️ 設定</button>
+    </div>
+  </div>
+
+  <!-- データ一覧画面 (自己評価フラグ追加) -->
+  <div id="screen-list" class="screen" style="max-width: 1100px;">
+    <h2>📋 データ一覧</h2>
+    <div style="display: flex; justify-content: space-between; margin-bottom: 15px; flex-wrap: wrap; gap: 10px;">
+      <label>設備分類: <select id="list-category-filter" style="padding: 5px; border-radius: 5px;"><option value="all">すべて</option></select></label>
+      <span>合計: <strong id="list-total-count">0</strong> 件</span>
+    </div>
+    <div class="table-responsive">
+      <table id="data-list-table">
+        <thead>
+          <tr>
+            <th style="min-width: 140px;">マーク</th>
+            <th>設備分類</th><th>対象号機</th><th>系統</th><th>略語</th><th>日本語</th><th>概略</th><th>概要</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <div style="text-align: center;"><button class="nav-home" style="flex-direction:row;">ホームに戻る</button></div>
+  </div>
+
+  <!-- 📊 学習分析＆間違えた問題リスト画面 (カテゴライズ化対応) -->
+  <div id="screen-analytics" class="screen" style="max-width: 1000px;">
+    <h2>📊 学習分析レポート</h2>
+    <div class="stat-cards">
+      <div class="stat-card"><h4>全体進捗 (学習済み)</h4><div class="value" id="stat-progress">0 / 0</div></div>
+      <div class="stat-card"><h4>全体正答率</h4><div class="value" id="stat-accuracy">0%</div></div>
+    </div>
+    <div class="settings-section">
+      <h3 style="margin-top:0;">📂 設備分類ごとの正答率</h3>
+      <div class="table-responsive">
+        <table id="analytics-cat-table">
+          <thead><tr><th>設備分類</th><th>問題数</th><th>学習済</th><th>正答率</th></tr></thead>
+          <tbody><!-- 動的生成 --></tbody>
+        </table>
+      </div>
+    </div>
+    
+    <div class="settings-section">
+      <h3 style="color: var(--danger-color); margin-top:0;">⚠️ 間違えた問題リスト (設備分類別)</h3>
+      <!-- ★ここに分類別のテーブルが動的生成されます -->
+      <div id="analytics-wrong-container"></div>
+    </div>
+    
+    <div style="text-align: center;"><button class="nav-home" style="flex-direction:row;">ホームに戻る</button></div>
+  </div>
+
+  <!-- 学習条件設定画面 -->
+  <div id="screen-config" class="screen">
+    <h2>学習条件の設定</h2>
+    <div class="settings-section config-form">
+      <h3 style="margin-top: 0;">🔍 出題の絞り込み</h3>
+      
+      <!-- ★自己評価マークでの絞り込みを追加 -->
+      <label>自己評価マーク:</label>
+      <div id="filter-flags" class="checkbox-group">
+        <label class="checkbox-label"><input type="checkbox" value="uneasy" class="chk-flag"> 😰 不安</label>
+        <label class="checkbox-label"><input type="checkbox" value="mistake" class="chk-flag"> ⚠️ ミス注意</label>
+      </div>
+
+      <label>設備分類:</label>
+      <div id="filter-equipments" class="checkbox-group"></div>
+      <hr style="border: 0; border-top: 1px solid var(--border-color); margin: 20px 0;">
+
+      <label>出題数:
+        <select id="config-count"><option value="all">すべて</option><option value="10">10問</option><option value="20">20問</option><option value="50">50問</option></select>
+      </label>
+      <label>学習モード:
+        <select id="config-mode">
+          <option value="normal">通常 (略語 → 日本語)</option>
+          <option value="reverse">反転 (日本語 → 略語)</option>
+          <option value="rev1">Rev1 (略語表示 / 日本語入力)</option>
+          <option value="rev2">Rev2 (日本語表示 / 略語入力)</option>
+          <option value="test">テスト (ランダム・時間制限)</option>
+        </select>
+      </label>
+      <div style="display: flex; gap: 10px; margin-top: 20px;">
+        <button id="btn-start-session" class="primary-btn" style="flex:1; flex-direction:row;">スタート</button>
+        <button class="nav-home" style="flex:1; flex-direction:row;">戻る</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 学習セッション画面 -->
+  <div id="screen-session" class="screen">
+    <div class="session-header">
+      <span id="session-progress">0 / 0</span>
+      <span id="session-timer" style="display:none; color: var(--danger-color);">⏳ 00:00</span>
+    </div>
+    
+    <div class="card-area">
+      <!-- ★バッジと自己評価マークを上部に配置 -->
+      <div class="card-top-row">
+        <div id="card-badges">
+          <span id="badge-equipment" class="badge"></span>
+          <span id="badge-system" class="badge"></span>
+        </div>
+        <div id="card-flags" style="display:flex; gap:5px;">
+          <button class="flag-btn toggle-flag-btn" id="session-flag-uneasy" data-flag="uneasy" title="不安">😰 不安</button>
+          <button class="flag-btn toggle-flag-btn" id="session-flag-mistake" data-flag="mistake" title="間違えやすい">⚠️ ミス注意</button>
+        </div>
+      </div>
+      
+      <h2 id="card-question"></h2>
+      
+      <div id="card-input-section" style="display:none; width: 100%;">
+        <input type="text" id="user-answer-input" autocomplete="off" placeholder="答えを入力...">
+        <div id="judgment-result" style="font-size: 1.2rem; font-weight:bold; margin-bottom:10px;"></div>
+      </div>
+      
+      <div id="card-details" style="display:none; background: var(--bg-color); padding: 15px; border-radius: 10px; margin-top: auto; text-align: left; width: 100%;">
+        <h3 id="card-answer" style="color:var(--primary-color); text-align: center; margin-top:0;"></h3>
+        <p style="margin:5px 0;"><strong>フルスペル:</strong> <span id="card-fullspell"></span></p>
+        <p style="margin:5px 0;"><strong>概略:</strong> <span id="card-outline"></span></p>
+        <p style="margin:5px 0;"><strong>概要:</strong> <span id="card-overview"></span></p>
+      </div>
+    </div>
+    
+    <div class="session-controls">
+      <button id="btn-prev"><span>◀ 前へ</span><span class="shortcut-key">[1]</span></button>
+      <button id="btn-ans" class="primary-btn"><span>ANS判定</span><span class="shortcut-key">[2/Enter]</span></button>
+      <button id="btn-mark-correct" class="success-btn" title="正解にする"><span>✔</span><span class="shortcut-key">[3]</span></button>
+      <button id="btn-next"><span>次へ ▶</span><span class="shortcut-key">[4/Enter]</span></button>
+      <button id="btn-exit" class="danger-btn"><span>終了</span><span class="shortcut-key">[5]</span></button>
+    </div>
+  </div>
+
+  <div id="screen-result" class="screen">
+    <h2>学習結果</h2>
+    <div class="settings-section" style="text-align: center; font-size:1.5rem;">
+      <p>正解数: <strong id="res-correct" style="color:var(--success-color);">0</strong> / <span id="res-total">0</span></p>
+      <p>正解率: <strong id="res-accuracy" style="color:var(--primary-color);">0</strong>%</p>
+    </div>
+    <div style="display: flex; gap: 10px; justify-content: center;">
+      <button id="btn-review-wrong" class="warning-btn" style="display:none; flex-direction:row;">間違えた問題を復習</button>
+      <button class="nav-home" style="flex-direction:row;">ホームに戻る</button>
+    </div>
+  </div>
+
+  <div id="screen-settings" class="screen">
+    <!-- 省略せずに記載 -->
+    <h2>⚙️ 設定</h2>
+    <div class="settings-section">
+      <h3>① 問題データの更新 (CSV)</h3>
+      <p style="font-size: 0.85rem; color: #666;">形式: 設備分類, 対象号機, 系統番号, 略語, フルスペル, 日本語, 概略, 概要</p>
+      <input type="file" id="csv-upload" accept=".csv">
+      <button id="btn-import-csv" class="primary-btn" style="width:100%; margin-top:10px; flex-direction:row;">CSVをインポート</button>
+      <p id="import-msg" style="text-align: center; font-weight: bold; margin-top: 10px;"></p>
+    </div>
+    <div class="settings-section">
+      <h3>② データのバックアップ・復元</h3>
+      <div style="margin-bottom: 15px; text-align: left;">
+        <label style="display: flex; align-items: center; gap: 5px; cursor: pointer; margin-bottom: 10px;">
+          <input type="checkbox" id="backup-include-cards" checked>
+          問題データも含めて保存する
+        </label>
+        <button id="btn-export-backup" class="primary-btn" style="width:100%; flex-direction:row;">バックアップをダウンロード</button>
+      </div>
+      <hr style="border: 0; border-top: 1px solid var(--border-color); margin: 15px 0;">
+      <div style="text-align: left;">
+        <p style="font-size: 0.85rem; margin-bottom:5px; font-weight: bold;">バックアップファイルから復元</p>
+        <input type="file" id="backup-upload" accept=".json">
+        <button id="btn-import-backup" class="warning-btn" style="width:100%; margin-top:10px; flex-direction:row;">復元する</button>
+        <p id="backup-msg" style="text-align: center; font-weight: bold; margin-top: 10px;"></p>
+      </div>
+    </div>
+    <div class="settings-section">
+      <h3>データのリセット</h3>
+      <div style="display: flex; flex-direction: column; gap: 10px;">
+        <button id="btn-reset-history" class="warning-btn" style="flex-direction:row;">学習履歴のみリセット</button>
+        <button id="btn-reset-all" class="danger-btn" style="flex-direction:row;">全データ完全リセット</button>
+      </div>
+    </div>
+    <div class="settings-section">
+      <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+        <input type="checkbox" id="theme-toggle" style="width:20px; height:20px;"> ダークモード
+      </label>
+    </div>
+    <div style="text-align: center;"><button class="nav-home" style="flex-direction:row;">ホームに戻る</button></div>
+  </div>
+
+  <div id="modal-exit" class="modal">
+    <div class="modal-content">
+      <h3>本当に終了しますか？</h3>
+      <div class="modal-actions"><button id="btn-modal-yes" class="primary-btn" style="flex-direction:row;">Yes</button><button id="btn-modal-no" style="flex-direction:row;">No</button></div>
+    </div>
+  </div>
+  <div id="modal-confirm" class="modal">
+    <div class="modal-content">
+      <h3 id="confirm-title" style="color: var(--danger-color);">確認</h3>
+      <p id="confirm-message">本当に実行しますか？</p>
+      <div class="modal-actions"><button id="btn-confirm-yes" class="danger-btn" style="flex-direction:row;">はい</button><button id="btn-confirm-no" style="flex-direction:row;">キャンセル</button></div>
+    </div>
+  </div>
+
+  <script src="db.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
