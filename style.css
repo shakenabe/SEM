@@ -1,0 +1,68 @@
+:root {
+  --bg-color: #f9fafb;
+  --text-color: #1f2937;
+  --card-bg: #ffffff;
+  --primary-color: #3b82f6;
+  --primary-hover: #2563eb;
+  --danger-color: #ef4444;
+  --border-color: #e5e7eb;
+}
+
+[data-theme="dark"] {
+  --bg-color: #111827;
+  --text-color: #f3f4f6;
+  --card-bg: #1f2937;
+  --primary-color: #60a5fa;
+  --primary-hover: #3b82f6;
+  --border-color: #374151;
+}
+
+body {
+  font-family: sans-serif;
+  background-color: var(--bg-color);
+  color: var(--text-color);
+  margin: 0;
+  padding: 20px;
+}
+
+.screen { display: none; max-width: 600px; margin: 0 auto; }
+.screen.active { display: block; }
+
+button {
+  cursor: pointer; padding: 10px 15px; border: none; border-radius: 5px;
+  background: var(--card-bg); color: var(--text-color); border: 1px solid var(--border-color);
+}
+button:hover { background: var(--border-color); }
+button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.primary-btn { background: var(--primary-color); color: white; border: none; }
+.primary-btn:hover { background: var(--primary-hover); }
+.danger-btn { background: var(--danger-color); color: white; border: none; }
+
+.menu { display: flex; flex-direction: column; gap: 15px; }
+.menu-btn { font-size: 1.1em; padding: 15px; text-align: left; }
+
+.card-area {
+  background: var(--card-bg); padding: 30px; border-radius: 10px;
+  box-shadow: 0 4px 6px rgba(0,0,0,0.1); margin: 20px 0; min-height: 200px;
+}
+
+.session-header { display: flex; justify-content: space-between; font-weight: bold; }
+.session-controls { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+
+.badge {
+  display: inline-block; padding: 4px 8px; font-size: 0.8em;
+  background: var(--border-color); border-radius: 12px; margin-right: 5px;
+}
+
+#user-answer-input {
+  width: 100%; padding: 10px; margin: 15px 0; font-size: 1em; box-sizing: border-box;
+}
+
+/* モーダル */
+.modal {
+  display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+  background: rgba(0,0,0,0.5); align-items: center; justify-content: center;
+}
+.modal.active { display: flex; }
+.modal-content { background: var(--card-bg); padding: 20px; border-radius: 10px; text-align: center; }
