@@ -10,18 +10,11 @@ const AppState = {
   }
 };
 
+let currentCsvText = ''; // インポート時のCSVテキスト一時保持用
+
 // ==========================================
 // ユーティリティ関数
 // ==========================================
-async function getAllFromStore(storeName) {
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(storeName, 'readonly');
-    const req = tx.objectStore(storeName).getAll();
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
-  });
-}
-
 function normalizeString(str) {
   if (!str) return '';
   return str.replace(/[Ａ-Ｚａ-ｚ０-９]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0))
@@ -33,6 +26,10 @@ function showScreen(screenId) {
   document.getElementById(`screen-${screenId}`).classList.add('active');
   AppState.currentScreen = screenId;
   window.scrollTo(0, 0);
+
+  if (screenId === 'home') {
+    updateHomeSummary();
+  }
 }
 
 function confirmAction(title, message) {
@@ -59,9 +56,42 @@ function confirmAction(title, message) {
 }
 
 // ==========================================
+// ホーム画面サマリー更新
+// ==========================================
+async function updateHomeSummary() {
+  const cards = await getAllFromStore('cards');
+  const summaryEl = document.getElementById('home-data-summary');
+  
+  if (cards.length === 0) {
+    summaryEl.innerHTML = '<div style="text-align:center; color:#666;">データがありません。<br>「設定」からCSVをインポートしてください。</div>';
+    return;
+  }
+  
+  const eqMap = {};
+  cards.forEach(c => {
+    const eqs = (c.equipmentCategory && c.equipmentCategory.length > 0) ? c.equipmentCategory : ['分類なし'];
+    eqs.forEach(eq => {
+      eqMap[eq] = (eqMap[eq] || 0) + 1;
+    });
+  });
+
+  let tagsHtml = '';
+  Object.keys(eqMap).sort().forEach(eq => {
+    tagsHtml += `<span class="home-summary-tag">${eq}: ${eqMap[eq]}件</span>`;
+  });
+
+  summaryEl.innerHTML = `
+    <div class="home-summary-title">総問題数: ${cards.length} 問</div>
+    <div class="home-summary-tags">${tagsHtml}</div>
+  `;
+}
+
+// ==========================================
 // 初期化・共通イベントリスナー
 // ==========================================
 document.addEventListener('DOMContentLoaded', () => {
+  updateHomeSummary();
+
   document.querySelectorAll('.menu-btn[data-target]').forEach(btn => {
     btn.addEventListener('click', async (e) => {
       const target = e.target.closest('button').dataset.target;
@@ -75,8 +105,8 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   document.querySelectorAll('.nav-home').forEach(btn => btn.addEventListener('click', () => showScreen('home')));
-  
   document.getElementById('btn-go-analytics').addEventListener('click', renderAnalyticsScreen);
+  
   const btnList = document.getElementById('btn-go-list');
   if(btnList) btnList.addEventListener('click', renderListScreen);
 
@@ -100,7 +130,7 @@ document.addEventListener('DOMContentLoaded', () => {
     showScreen('config');
   });
 
-  // ========== 自己評価フラグ (トグル操作) ==========
+  // 自己評価フラグ (トグル操作)
   document.addEventListener('click', (e) => {
     const btn = e.target.closest('.toggle-flag-btn');
     if (!btn) return;
@@ -128,7 +158,19 @@ document.addEventListener('DOMContentLoaded', () => {
     };
   });
 
-  // ========== UI切り替えイベント (出題方法) ==========
+  // アコーディオン開閉
+  document.addEventListener('click', (e) => {
+    const header = e.target.closest('.folder-header');
+    if (header) {
+      header.classList.toggle('closed');
+      const content = header.nextElementSibling;
+      if (content && content.classList.contains('folder-content')) {
+        content.classList.toggle('closed');
+      }
+    }
+  });
+
+  // UI切り替え (出題方法)
   document.querySelectorAll('input[name="extract-type"]').forEach(radio => {
     radio.addEventListener('change', (e) => {
       if (e.target.value === 'random') {
@@ -138,10 +180,10 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('config-opt-random').style.display = 'none';
         document.getElementById('config-opt-range').style.display = 'block';
       }
+      document.getElementById('config-set-preview').style.display = 'none';
     });
   });
 
-  // 絞り込み条件が変更されたらプレビューを更新
   document.querySelector('.config-form').addEventListener('change', (e) => {
     if (e.target.classList.contains('chk-flag') || e.target.classList.contains('chk-eq') || 
         e.target.id === 'config-span' || e.target.id === 'config-chunk-size') {
@@ -149,28 +191,162 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // ========== 設定画面 (CSV/バックアップ/リセット) ==========
-  const importBtn = document.getElementById('btn-import-csv');
+  document.getElementById('btn-toggle-preview').addEventListener('click', async () => {
+    const previewDiv = document.getElementById('config-set-preview');
+    if (previewDiv.style.display === 'block') {
+      previewDiv.style.display = 'none';
+      return;
+    }
+    
+    let cards = await getFilteredCards();
+    const chunkSize = parseInt(document.getElementById('config-chunk-size').value);
+    const chunkIndex = parseInt(document.getElementById('config-chunk-select').value);
+    
+    if (!isNaN(chunkIndex)) {
+      const start = chunkIndex * chunkSize;
+      const end = start + chunkSize;
+      cards = cards.slice(start, end);
+    } else {
+      cards =[];
+    }
+
+    if (cards.length === 0) {
+      previewDiv.innerHTML = '<div style="text-align:center; padding:10px;">問題がありません</div>';
+    } else {
+      let html = '';
+      cards.forEach((c, i) => {
+        html += `<div class="set-preview-item"><strong>${i + 1}. ${c.abbr}</strong> <span style="font-size:0.85rem; color:var(--primary-color);">(${c.ja})</span></div>`;
+      });
+      previewDiv.innerHTML = html;
+    }
+    previewDiv.style.display = 'block';
+  });
+
+
+  // ==========================================
+  // ★CSVインポート（マッピング）関連
+  // ==========================================
+  const triggerImportBtn = document.getElementById('btn-trigger-mapping');
   const fileInput = document.getElementById('csv-upload');
   const msgEl = document.getElementById('import-msg');
 
-  importBtn.addEventListener('click', () => {
+  triggerImportBtn.addEventListener('click', () => {
     const file = fileInput.files[0];
     if (!file) { msgEl.style.color = "var(--danger-color)"; msgEl.textContent = "ファイルを選択してください。"; return; }
+    
     const reader = new FileReader();
-    reader.onload = async (e) => {
-      try {
-        const result = await importCSV(e.target.result);
-        msgEl.style.color = "var(--success-color)"; 
-        msgEl.textContent = `更新: ${result.updated}件 / 削除: ${result.deleted}件`;
-        localStorage.setItem('lastDataUpdate', Date.now().toString());
-      } catch (err) {
-        msgEl.style.color = "var(--danger-color)"; msgEl.textContent = "エラー: " + err.message;
+    reader.onload = (e) => {
+      currentCsvText = e.target.result;
+      const rows = window.parseCSV(currentCsvText);
+      if(rows.length < 2) {
+        msgEl.style.color = "var(--danger-color)"; msgEl.textContent = "データがありません。"; return;
       }
+      openMappingModal(rows[0]); // 1行目(ヘッダー)を渡す
     };
     reader.readAsText(file);
   });
 
+  function openMappingModal(headers) {
+    const container = document.getElementById('csv-mapping-container');
+    container.innerHTML = '';
+    
+    // アプリ側の項目定義と自動推定用のキーワード
+    const appFields =[
+      { key: 'equipmentCategory', label: '設備分類', keywords: ['設備', '分類', 'カテゴリ'] },
+      { key: 'targetMachine', label: '対象号機', keywords:['号機', '対象', '機器'] },
+      { key: 'systemNumber', label: '系統番号', keywords:['系統', '番号', 'システム'] },
+      { key: 'abbr', label: '略語', keywords:['略語', '略称', '英語', '問題'] },
+      { key: 'fullSpell', label: 'フルスペル', keywords: ['フル', 'スペル', '古', 'full'] },
+      { key: 'ja', label: '日本語', keywords: ['日本', '和名', '意味', '解答', '答え'] },
+      { key: 'outline', label: '概略', keywords: ['概略'] },
+      { key: 'overview', label: '概要', keywords: ['概要', '役割', '詳細', '解説'] }
+    ];
+    
+    appFields.forEach(field => {
+      const row = document.createElement('div');
+      row.className = 'mapping-row';
+      
+      const label = document.createElement('div');
+      label.className = 'mapping-label';
+      label.textContent = field.label;
+      if(field.key === 'abbr' || field.key === 'ja') label.innerHTML += ' <span style="color:var(--danger-color);">*</span>';
+      
+      const select = document.createElement('select');
+      select.className = 'mapping-select';
+      select.dataset.key = field.key;
+      
+      const optNone = document.createElement('option');
+      optNone.value = '-1';
+      optNone.textContent = '（使用しない）';
+      select.appendChild(optNone);
+      
+      let bestMatchIdx = -1;
+      headers.forEach((h, idx) => {
+        const opt = document.createElement('option');
+        opt.value = idx;
+        opt.textContent = `[列${idx + 1}] ${h}`;
+        select.appendChild(opt);
+        
+        // ヘッダー名から自動推定
+        if(bestMatchIdx === -1) {
+          if (h.includes(field.label)) {
+            bestMatchIdx = idx;
+          } else if (field.keywords && field.keywords.some(kw => h.includes(kw))) {
+            bestMatchIdx = idx;
+          }
+        }
+      });
+      
+      if(bestMatchIdx !== -1) select.value = bestMatchIdx;
+      
+      row.appendChild(label);
+      row.appendChild(select);
+      container.appendChild(row);
+    });
+    
+    document.getElementById('modal-csv-mapping').classList.add('active');
+  }
+
+  document.getElementById('btn-cancel-import').addEventListener('click', () => {
+    document.getElementById('modal-csv-mapping').classList.remove('active');
+    currentCsvText = '';
+  });
+
+  document.getElementById('btn-execute-import').addEventListener('click', async () => {
+    const selects = document.querySelectorAll('.mapping-select');
+    const mapping = {};
+    let abbrMapped = false, jaMapped = false;
+    
+    selects.forEach(sel => {
+      const key = sel.dataset.key;
+      const val = parseInt(sel.value, 10);
+      mapping[key] = val;
+      if(key === 'abbr' && val !== -1) abbrMapped = true;
+      if(key === 'ja' && val !== -1) jaMapped = true;
+    });
+    
+    if(!abbrMapped || !jaMapped) {
+      alert("「略語」と「日本語」の列は必須です。いずれかの列を割り当ててください。");
+      return;
+    }
+    
+    document.getElementById('modal-csv-mapping').classList.remove('active');
+    
+    try {
+      const result = await importCSV(currentCsvText, mapping); // マッピング情報を渡す
+      msgEl.style.color = "var(--success-color)"; 
+      msgEl.textContent = `成功！ 更新: ${result.updated}件 / 削除: ${result.deleted}件`;
+      localStorage.setItem('lastDataUpdate', Date.now().toString());
+      updateHomeSummary();
+    } catch (err) {
+      msgEl.style.color = "var(--danger-color)"; 
+      msgEl.textContent = "エラー: " + err.message;
+    }
+    currentCsvText = '';
+  });
+
+
+  // ========== バックアップ＆リセット関連 ==========
   document.getElementById('btn-export-backup').addEventListener('click', async () => {
     try {
       const includeCards = document.getElementById('backup-include-cards').checked;
@@ -212,6 +388,7 @@ document.addEventListener('DOMContentLoaded', () => {
         await importBackup(jsonStr);
         localStorage.setItem('lastDataUpdate', Date.now().toString());
         msg.style.color = "var(--success-color)"; msg.textContent = "復元が完了しました！";
+        updateHomeSummary();
       } catch (err) { msg.style.color = "var(--danger-color)"; msg.textContent = "復元エラー: " + err.message; }
     };
     reader.readAsText(file);
@@ -225,7 +402,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
   document.getElementById('btn-reset-all').addEventListener('click', async () => {
     if(await confirmAction('全データ完全リセット', '問題データと履歴を【すべて】削除しますか？')) {
-      await clearStore('cards'); await clearStore('progress'); await clearStore('attempts'); alert('全リセットしました。');
+      await clearStore('cards'); await clearStore('progress'); await clearStore('attempts'); 
+      updateHomeSummary();
+      alert('全リセットしました。');
     }
   });
 
@@ -268,7 +447,7 @@ document.addEventListener('keydown', (e) => {
 });
 
 // ==========================================
-// 📋 データ一覧画面 (カテゴライズ対応)
+// 📋 データ一覧画面
 // ==========================================
 let listAllCards =[];
 async function renderListScreen() {
@@ -303,7 +482,7 @@ async function renderListTable() {
     
     const eqs = (c.equipmentCategory && c.equipmentCategory.length > 0) ? c.equipmentCategory : ['分類なし'];
     eqs.forEach(eq => {
-      if (filterCat !== 'all' && eq !== filterCat) return; // 選択したカテゴリだけ表示
+      if (filterCat !== 'all' && eq !== filterCat) return; 
       if(!grouped[eq]) grouped[eq] = [];
       grouped[eq].push(c);
     });
@@ -319,17 +498,15 @@ async function renderListTable() {
   Object.keys(grouped).sort().forEach(eq => {
     const gCards = grouped[eq];
     const wrapper = document.createElement('div');
-    wrapper.style.marginBottom = '25px';
+    wrapper.style.marginBottom = '15px';
     
-    const h4 = document.createElement('h4');
-    h4.textContent = `📁 ${eq} (${gCards.length}件)`;
-    h4.style.margin = '0 0 10px';
-    h4.style.paddingLeft = '5px';
-    h4.style.borderLeft = '4px solid var(--primary-color)';
+    const header = document.createElement('div');
+    header.className = 'folder-header closed';
+    header.innerHTML = `📁 ${eq} <span style="font-size:0.9rem; font-weight:normal;">(${gCards.length}件)</span>`;
     
-    const tableDiv = document.createElement('div');
-    tableDiv.className = 'table-responsive';
-    tableDiv.style.marginBottom = '0';
+    const content = document.createElement('div');
+    content.className = 'folder-content table-responsive closed';
+    content.style.marginBottom = '0';
     
     const table = document.createElement('table');
     table.innerHTML = `
@@ -362,13 +539,12 @@ async function renderListTable() {
       tbody.appendChild(tr);
     });
     
-    tableDiv.appendChild(table);
-    wrapper.appendChild(h4);
-    wrapper.appendChild(tableDiv);
+    content.appendChild(table);
+    wrapper.appendChild(header);
+    wrapper.appendChild(content);
     container.appendChild(wrapper);
   });
 }
-
 
 // ==========================================
 // 📊 学習分析・間違えた問題リスト
@@ -429,9 +605,9 @@ async function renderAnalyticsScreen() {
   } else {
     const grouped = {};
     wrongCards.forEach(c => {
-      const eqs = (c.equipmentCategory && c.equipmentCategory.length > 0) ? c.equipmentCategory :['分類なし'];
+      const eqs = (c.equipmentCategory && c.equipmentCategory.length > 0) ? c.equipmentCategory : ['分類なし'];
       eqs.forEach(eq => {
-        if(!grouped[eq]) grouped[eq] = [];
+        if(!grouped[eq]) grouped[eq] =[];
         grouped[eq].push(c);
       });
     });
@@ -441,17 +617,15 @@ async function renderAnalyticsScreen() {
       gCards.sort((a, b) => progMap.get(b.id).wrongCount - progMap.get(a.id).wrongCount);
       
       const wrapper = document.createElement('div');
-      wrapper.style.marginBottom = '25px';
+      wrapper.style.marginBottom = '15px';
       
-      const h4 = document.createElement('h4');
-      h4.textContent = `📁 ${eq} (${gCards.length}件)`;
-      h4.style.margin = '0 0 10px';
-      h4.style.paddingLeft = '5px';
-      h4.style.borderLeft = '4px solid var(--primary-color)';
+      const header = document.createElement('div');
+      header.className = 'folder-header closed';
+      header.innerHTML = `📁 ${eq} <span style="font-size:0.9rem; font-weight:normal;">(${gCards.length}件)</span>`;
       
-      const tableDiv = document.createElement('div');
-      tableDiv.className = 'table-responsive';
-      tableDiv.style.marginBottom = '0';
+      const content = document.createElement('div');
+      content.className = 'folder-content table-responsive closed';
+      content.style.marginBottom = '0';
       
       const table = document.createElement('table');
       table.innerHTML = `
@@ -481,21 +655,18 @@ async function renderAnalyticsScreen() {
         tbody.appendChild(tr);
       });
       
-      tableDiv.appendChild(table);
-      wrapper.appendChild(h4);
-      wrapper.appendChild(tableDiv);
+      content.appendChild(table);
+      wrapper.appendChild(header);
+      wrapper.appendChild(content);
       container.appendChild(wrapper);
     });
   }
   showScreen('analytics');
 }
 
-
 // ==========================================
 // 🔍 設定画面＆プレビュー・出題セット生成
 // ==========================================
-
-// ベースとなる抽出・フィルタリング処理（共通化）
 async function getFilteredCards() {
   const allCards = await getAllFromStore('cards');
   const allProgress = await getAllFromStore('progress');
@@ -504,7 +675,7 @@ async function getFilteredCards() {
   let filtered =[];
 
   if (AppState.entryType === 'normal') {
-    filtered = [...allCards]; // ここではシャッフルせず順番を維持
+    filtered = [...allCards]; 
   } else if (AppState.entryType === 'wrong') {
     filtered = allCards.filter(c => progMap.get(c.id)?.wrongCount > 0);
     filtered.sort((a, b) => (progMap.get(b.id)?.lastWrongAt || 0) - (progMap.get(a.id)?.lastWrongAt || 0));
@@ -534,7 +705,6 @@ async function getFilteredCards() {
     filtered.sort((a, b) => (progMap.get(a.id)?.lastAnsweredAt || 0) - (progMap.get(b.id)?.lastAnsweredAt || 0));
   }
 
-  // フラグによる絞り込み
   const checkedFlags = Array.from(document.querySelectorAll('.chk-flag:checked')).map(cb => cb.value);
   if (checkedFlags.length > 0) {
     filtered = filtered.filter(c => {
@@ -544,7 +714,6 @@ async function getFilteredCards() {
     });
   }
 
-  // 設備分類による絞り込み
   const checkedEqs = Array.from(document.querySelectorAll('.chk-eq:checked')).map(cb => cb.value);
   if (checkedEqs.length > 0) {
     filtered = filtered.filter(c => {
@@ -555,18 +724,15 @@ async function getFilteredCards() {
   return filtered;
 }
 
-// プレビュー表示の更新と、区間(セット)プルダウンの生成
 async function updateConfigPreview() {
   const filtered = await getFilteredCards();
-  
-  // リアルタイム件数表示
   const countDisplay = document.getElementById('config-target-count-display');
   countDisplay.textContent = `現在の対象問題数: ${filtered.length} 問`;
 
-  // 区間（セット）プルダウンの更新
   const chunkSize = parseInt(document.getElementById('config-chunk-size').value) || 20;
   const chunkSelect = document.getElementById('config-chunk-select');
   chunkSelect.innerHTML = '';
+  document.getElementById('config-set-preview').style.display = 'none';
   
   if (filtered.length === 0) {
     chunkSelect.innerHTML = '<option value="0">データがありません</option>';
@@ -597,7 +763,6 @@ async function prepareConfigScreen() {
     if (spanSelect) document.getElementById('label-config-span').remove();
   }
 
-  // 設備分類チェックボックスの生成 (初回のみ)
   const eqContainer = document.getElementById('filter-equipments');
   if (eqContainer.innerHTML === '') {
     const eqSet = new Set();
@@ -609,7 +774,6 @@ async function prepareConfigScreen() {
     });
   }
   
-  // 画面を開くたびにプレビューを計算して表示
   await updateConfigPreview();
 }
 
@@ -624,14 +788,12 @@ async function startSession() {
   const extractType = document.querySelector('input[name="extract-type"]:checked').value;
 
   if (extractType === 'random') {
-    // ランダム抽出の場合はシャッフルして出題数分スライス
     cards.sort(() => Math.random() - 0.5);
     const countSelect = document.getElementById('config-count').value;
     if (countSelect !== 'all') {
       cards = cards.slice(0, parseInt(countSelect));
     }
   } else {
-    // 区間(セット)抽出の場合は順番を維持して指定範囲をスライス
     const chunkSize = parseInt(document.getElementById('config-chunk-size').value);
     const chunkIndex = parseInt(document.getElementById('config-chunk-select').value);
     if (!isNaN(chunkIndex)) {
@@ -731,9 +893,6 @@ function renderCard() {
   }
 }
 
-// ==========================================
-// 解答・判定ロジック
-// ==========================================
 async function handleAnswer() {
   const s = AppState.session;
   const card = s.cards[s.currentIndex];
