@@ -36,7 +36,6 @@ function initDB() {
   });
 }
 
-// 汎用データ取得ヘルパー
 async function getAllFromStore(storeName) {
   return new Promise((resolve, reject) => {
     const tx = db.transaction(storeName, 'readonly');
@@ -47,9 +46,9 @@ async function getAllFromStore(storeName) {
 }
 
 // ==========================================
-// CSVパーサー & インポート
+// CSVパーサー (グローバルに露出して app.js からも使えるようにする)
 // ==========================================
-function parseCSV(csvText) {
+window.parseCSV = function(csvText) {
   const rows =[]; let currentRow =[]; let currentCell = ''; let insideQuotes = false;
   for (let i = 0; i < csvText.length; i++) {
     const char = csvText[i], nextChar = csvText[i + 1];
@@ -73,28 +72,45 @@ function parseCSV(csvText) {
     if (currentRow.join('') !== '') rows.push(currentRow);
   }
   return rows;
-}
+};
 
-async function importCSV(csvText) {
-  const rows = parseCSV(csvText);
+// ==========================================
+// ★マッピング対応版 インポート処理
+// ==========================================
+// mapping引数には { equipmentCategory: 1, abbr: 3, ja: 5 ... } のようなインデックスの対応表が入る
+async function importCSV(csvText, mapping = null) {
+  const rows = window.parseCSV(csvText);
   if (rows.length < 2) throw new Error('データがありません');
 
   const dataRows = rows.slice(1);
   const newCardsMap = new Map();
 
   for (const row of dataRows) {
-    if (row.length < 8) continue;
-    const[equipmentCategory, targetMachine, systemNumber, abbr, fullSpell, ja, outline, overview] = row;
-    if (!abbr || !ja) continue;
+    // マッピングで指定された列の値を取得する安全な関数
+    const getVal = (key) => (mapping && mapping[key] !== -1 && mapping[key] !== undefined && row[mapping[key]] !== undefined) ? row[mapping[key]] : '';
+    
+    // マッピングが渡されなかった場合は互換性のため旧インデックスをデフォルトとする
+    const equipmentCategoryStr = mapping ? getVal('equipmentCategory') : (row[0] || '');
+    const targetMachine = mapping ? getVal('targetMachine') : (row[1] || '');
+    const systemNumber = mapping ? getVal('systemNumber') : (row[2] || '');
+    const abbr = mapping ? getVal('abbr') : (row[3] || '');
+    const fullSpell = mapping ? getVal('fullSpell') : (row[4] || '');
+    const ja = mapping ? getVal('ja') : (row[5] || '');
+    const outline = mapping ? getVal('outline') : (row[6] || '');
+    const overview = mapping ? getVal('overview') : (row[7] || '');
+
+    if (!abbr || !ja) continue; // 略語と日本語は必須
 
     const id = btoa(encodeURIComponent(`${abbr}_${ja}`));
     newCardsMap.set(id, {
       id,
-      equipmentCategory: equipmentCategory ? equipmentCategory.split('|') :[],
+      equipmentCategory: equipmentCategoryStr ? equipmentCategoryStr.split('|') :[],
       targetMachine, systemNumber, abbr, fullSpell, ja, outline, overview,
       updatedAt: Date.now()
     });
   }
+
+  if (newCardsMap.size === 0) throw new Error('有効なデータ(略語と日本語が存在する行)が見つかりませんでした。');
 
   return new Promise((resolve, reject) => {
     const tx = db.transaction(['cards'], 'readwrite');
@@ -116,7 +132,7 @@ async function importCSV(csvText) {
 }
 
 // ==========================================
-// ★バックアップ（エクスポート）処理
+// バックアップ
 // ==========================================
 async function exportBackup(includeCards) {
   const backupData = {
@@ -125,52 +141,32 @@ async function exportBackup(includeCards) {
     progress: await getAllFromStore('progress'),
     attempts: await getAllFromStore('attempts')
   };
-
-  // ユーザーが選択した場合のみ、問題データ(cards)を含める
-  if (includeCards) {
-    backupData.cards = await getAllFromStore('cards');
-  }
-
+  if (includeCards) backupData.cards = await getAllFromStore('cards');
   return JSON.stringify(backupData);
 }
 
-// ==========================================
-// ★バックアップからの復元（インポート）処理
-// ==========================================
 async function importBackup(jsonString) {
   const data = JSON.parse(jsonString);
   if (!data.timestamp || !data.version) throw new Error("無効なバックアップファイルです。");
-  
   return new Promise((resolve, reject) => {
-    // 書き込み対象のストアを指定
     const tx = db.transaction(['cards', 'progress', 'attempts'], 'readwrite');
-    
-    // 問題データの復元 (含まれている場合のみ上書き更新)
     if (data.cards && Array.isArray(data.cards)) {
       const cardsStore = tx.objectStore('cards');
       data.cards.forEach(c => cardsStore.put(c));
     }
-    
-    // 学習履歴(スコア)の復元
     if (data.progress && Array.isArray(data.progress)) {
       const progStore = tx.objectStore('progress');
       data.progress.forEach(p => progStore.put(p));
     }
-    
-    // 過去の解答ログの復元
     if (data.attempts && Array.isArray(data.attempts)) {
       const attStore = tx.objectStore('attempts');
       data.attempts.forEach(a => attStore.put(a));
     }
-
     tx.oncomplete = () => resolve();
     tx.onerror = (e) => reject(e.target.error);
   });
 }
 
-// ==========================================
-// リセット処理
-// ==========================================
 async function clearStore(storeName) {
   return new Promise((resolve, reject) => {
     const tx = db.transaction([storeName], 'readwrite');
@@ -180,5 +176,4 @@ async function clearStore(storeName) {
   });
 }
 
-// 初期化実行
 initDB().then(() => console.log('DB Initialized (Ver 2)'));
