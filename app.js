@@ -120,12 +120,33 @@ document.addEventListener('DOMContentLoaded', () => {
     req.onsuccess = () => {
       let p = req.result || { cardId, correctCount: 0, wrongCount: 0 };
       if (!p.flags) p.flags = {};
-      p.flags[flagType] = !p.flags[flagType]; // トグル
+      p.flags[flagType] = !p.flags[flagType]; 
       store.put(p);
       
       if (p.flags[flagType]) btn.classList.add('active');
       else btn.classList.remove('active');
     };
+  });
+
+  // ========== UI切り替えイベント (出題方法) ==========
+  document.querySelectorAll('input[name="extract-type"]').forEach(radio => {
+    radio.addEventListener('change', (e) => {
+      if (e.target.value === 'random') {
+        document.getElementById('config-opt-random').style.display = 'block';
+        document.getElementById('config-opt-range').style.display = 'none';
+      } else {
+        document.getElementById('config-opt-random').style.display = 'none';
+        document.getElementById('config-opt-range').style.display = 'block';
+      }
+    });
+  });
+
+  // 絞り込み条件が変更されたらプレビューを更新
+  document.querySelector('.config-form').addEventListener('change', (e) => {
+    if (e.target.classList.contains('chk-flag') || e.target.classList.contains('chk-eq') || 
+        e.target.id === 'config-span' || e.target.id === 'config-chunk-size') {
+      updateConfigPreview();
+    }
   });
 
   // ========== 設定画面 (CSV/バックアップ/リセット) ==========
@@ -247,7 +268,7 @@ document.addEventListener('keydown', (e) => {
 });
 
 // ==========================================
-// 📋 データ一覧画面
+// 📋 データ一覧画面 (カテゴライズ対応)
 // ==========================================
 let listAllCards =[];
 async function renderListScreen() {
@@ -268,43 +289,89 @@ async function renderListScreen() {
 
 async function renderListTable() {
   const filterCat = document.getElementById('list-category-filter').value;
-  const tbody = document.querySelector('#data-list-table tbody');
-  tbody.innerHTML = '';
+  const container = document.getElementById('data-list-container');
+  container.innerHTML = '';
   
   const progressList = await getAllFromStore('progress');
   const progMap = new Map(progressList.map(p =>[p.cardId, p]));
   let count = 0;
   
+  const grouped = {};
   listAllCards.forEach(c => {
     if (filterCat !== 'all' && (!c.equipmentCategory || !c.equipmentCategory.includes(filterCat))) return;
-    
-    const p = progMap.get(c.id);
-    const uAct = p?.flags?.uneasy ? 'active' : '';
-    const mAct = p?.flags?.mistake ? 'active' : '';
-
-    const tr = document.createElement('tr');
-    tr.innerHTML = `
-      <td style="white-space: nowrap;">
-        <button class="flag-btn toggle-flag-btn ${uAct}" data-id="${c.id}" data-flag="uneasy" title="不安">😰</button>
-        <button class="flag-btn toggle-flag-btn ${mAct}" data-id="${c.id}" data-flag="mistake" title="ミス注意">⚠️</button>
-      </td>
-      <td>${c.equipmentCategory?.join(', ') || ''}</td>
-      <td>${c.targetMachine || ''}</td>
-      <td>${c.systemNumber || ''}</td>
-      <td><strong>${c.abbr || ''}</strong></td>
-      <td><strong>${c.ja || ''}</strong></td>
-      <td>${c.outline || ''}</td>
-      <td>${c.overview || ''}</td>
-    `;
-    tbody.appendChild(tr); 
     count++;
+    
+    const eqs = (c.equipmentCategory && c.equipmentCategory.length > 0) ? c.equipmentCategory : ['分類なし'];
+    eqs.forEach(eq => {
+      if (filterCat !== 'all' && eq !== filterCat) return; // 選択したカテゴリだけ表示
+      if(!grouped[eq]) grouped[eq] = [];
+      grouped[eq].push(c);
+    });
   });
+  
   document.getElementById('list-total-count').textContent = count;
+
+  if (Object.keys(grouped).length === 0) {
+    container.innerHTML = '<p style="text-align:center; padding:20px;">データがありません</p>';
+    return;
+  }
+
+  Object.keys(grouped).sort().forEach(eq => {
+    const gCards = grouped[eq];
+    const wrapper = document.createElement('div');
+    wrapper.style.marginBottom = '25px';
+    
+    const h4 = document.createElement('h4');
+    h4.textContent = `📁 ${eq} (${gCards.length}件)`;
+    h4.style.margin = '0 0 10px';
+    h4.style.paddingLeft = '5px';
+    h4.style.borderLeft = '4px solid var(--primary-color)';
+    
+    const tableDiv = document.createElement('div');
+    tableDiv.className = 'table-responsive';
+    tableDiv.style.marginBottom = '0';
+    
+    const table = document.createElement('table');
+    table.innerHTML = `
+      <thead>
+        <tr><th style="min-width: 90px;">マーク</th><th>対象号機</th><th>系統</th><th>略語</th><th>フルスペル</th><th>日本語</th><th>概略</th><th>概要</th></tr>
+      </thead>
+      <tbody></tbody>
+    `;
+    const tbody = table.querySelector('tbody');
+    
+    gCards.forEach(c => {
+      const p = progMap.get(c.id);
+      const uAct = p?.flags?.uneasy ? 'active' : '';
+      const mAct = p?.flags?.mistake ? 'active' : '';
+      
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td style="white-space: nowrap;">
+          <button class="flag-btn toggle-flag-btn ${uAct}" data-id="${c.id}" data-flag="uneasy" title="不安">😰</button>
+          <button class="flag-btn toggle-flag-btn ${mAct}" data-id="${c.id}" data-flag="mistake" title="ミス注意">⚠️</button>
+        </td>
+        <td>${c.targetMachine || ''}</td>
+        <td>${c.systemNumber || ''}</td>
+        <td><strong>${c.abbr || ''}</strong></td>
+        <td>${c.fullSpell || ''}</td>
+        <td><strong>${c.ja || ''}</strong></td>
+        <td>${c.outline || ''}</td>
+        <td>${c.overview || ''}</td>
+      `;
+      tbody.appendChild(tr);
+    });
+    
+    tableDiv.appendChild(table);
+    wrapper.appendChild(h4);
+    wrapper.appendChild(tableDiv);
+    container.appendChild(wrapper);
+  });
 }
 
 
 // ==========================================
-// 📊 学習分析・間違えた問題リスト (カテゴライズ対応)
+// 📊 学習分析・間違えた問題リスト
 // ==========================================
 async function renderAnalyticsScreen() {
   const cards = await getAllFromStore('cards');
@@ -353,7 +420,6 @@ async function renderAnalyticsScreen() {
     catTbody.appendChild(tr);
   });
 
-  // ========== 間違えた問題リストを「設備分類ごと」にカテゴライズ ==========
   const container = document.getElementById('analytics-wrong-container');
   container.innerHTML = '';
   const wrongCards = cards.filter(c => progMap.get(c.id) && progMap.get(c.id).wrongCount > 0);
@@ -361,10 +427,9 @@ async function renderAnalyticsScreen() {
   if (wrongCards.length === 0) {
     container.innerHTML = '<p style="text-align:center; padding: 20px; background:var(--card-bg); border-radius:8px;">間違えた問題はありません！🎉</p>';
   } else {
-    // 設備ごとにグルーピング
     const grouped = {};
     wrongCards.forEach(c => {
-      const eqs = (c.equipmentCategory && c.equipmentCategory.length > 0) ? c.equipmentCategory : ['分類なし'];
+      const eqs = (c.equipmentCategory && c.equipmentCategory.length > 0) ? c.equipmentCategory :['分類なし'];
       eqs.forEach(eq => {
         if(!grouped[eq]) grouped[eq] = [];
         grouped[eq].push(c);
@@ -373,7 +438,6 @@ async function renderAnalyticsScreen() {
 
     Object.keys(grouped).sort().forEach(eq => {
       const gCards = grouped[eq];
-      // ミスが多い順にソート
       gCards.sort((a, b) => progMap.get(b.id).wrongCount - progMap.get(a.id).wrongCount);
       
       const wrapper = document.createElement('div');
@@ -428,46 +492,19 @@ async function renderAnalyticsScreen() {
 
 
 // ==========================================
-// 🔍 設定画面＆出題セット生成
+// 🔍 設定画面＆プレビュー・出題セット生成
 // ==========================================
-async function prepareConfigScreen() {
-  const cards = await getAllFromStore('cards');
-  const configForm = document.querySelector('.config-form');
-  let spanSelect = document.getElementById('config-span');
-  
-  if (AppState.entryType === 'weak') {
-    if (!spanSelect) {
-      const label = document.createElement('label');
-      label.id = 'label-config-span';
-      label.innerHTML = `集計期間: <select id="config-span"><option value="30">直近30日</option><option value="7">直近7日</option><option value="90">直近90日</option><option value="all">全期間</option></select>`;
-      configForm.insertBefore(label, document.getElementById('filter-flags').parentElement.previousElementSibling);
-    }
-  } else {
-    if (spanSelect) document.getElementById('label-config-span').remove();
-  }
 
-  const eqSet = new Set();
-  cards.forEach(c => {
-    if (c.equipmentCategory) c.equipmentCategory.forEach(eq => eqSet.add(eq));
-  });
-
-  const eqContainer = document.getElementById('filter-equipments');
-  eqContainer.innerHTML = '';
-  eqSet.forEach(eq => {
-    eqContainer.innerHTML += `<label class="checkbox-label"><input type="checkbox" value="${eq}" class="chk-eq"> ${eq}</label>`;
-  });
-}
-
-async function generateCardsForSession() {
+// ベースとなる抽出・フィルタリング処理（共通化）
+async function getFilteredCards() {
   const allCards = await getAllFromStore('cards');
   const allProgress = await getAllFromStore('progress');
   const allAttempts = await getAllFromStore('attempts');
   const progMap = new Map(allProgress.map(p =>[p.cardId, p]));
   let filtered =[];
 
-  // 1. ベース抽出
   if (AppState.entryType === 'normal') {
-    filtered = [...allCards].sort(() => Math.random() - 0.5);
+    filtered = [...allCards]; // ここではシャッフルせず順番を維持
   } else if (AppState.entryType === 'wrong') {
     filtered = allCards.filter(c => progMap.get(c.id)?.wrongCount > 0);
     filtered.sort((a, b) => (progMap.get(b.id)?.lastWrongAt || 0) - (progMap.get(a.id)?.lastWrongAt || 0));
@@ -497,17 +534,17 @@ async function generateCardsForSession() {
     filtered.sort((a, b) => (progMap.get(a.id)?.lastAnsweredAt || 0) - (progMap.get(b.id)?.lastAnsweredAt || 0));
   }
 
-  // 2. 自己評価マークでの絞り込み (OR条件)
+  // フラグによる絞り込み
   const checkedFlags = Array.from(document.querySelectorAll('.chk-flag:checked')).map(cb => cb.value);
   if (checkedFlags.length > 0) {
     filtered = filtered.filter(c => {
       const p = progMap.get(c.id);
       if (!p || !p.flags) return false;
-      return checkedFlags.some(flag => p.flags[flag]); // 選択したフラグが1つでもONなら対象
+      return checkedFlags.some(flag => p.flags[flag]); 
     });
   }
 
-  // 3. 設備分類での絞り込み (OR条件)
+  // 設備分類による絞り込み
   const checkedEqs = Array.from(document.querySelectorAll('.chk-eq:checked')).map(cb => cb.value);
   if (checkedEqs.length > 0) {
     filtered = filtered.filter(c => {
@@ -515,8 +552,65 @@ async function generateCardsForSession() {
     });
   }
 
-  const countSelect = document.getElementById('config-count').value;
-  return countSelect === 'all' ? filtered : filtered.slice(0, parseInt(countSelect));
+  return filtered;
+}
+
+// プレビュー表示の更新と、区間(セット)プルダウンの生成
+async function updateConfigPreview() {
+  const filtered = await getFilteredCards();
+  
+  // リアルタイム件数表示
+  const countDisplay = document.getElementById('config-target-count-display');
+  countDisplay.textContent = `現在の対象問題数: ${filtered.length} 問`;
+
+  // 区間（セット）プルダウンの更新
+  const chunkSize = parseInt(document.getElementById('config-chunk-size').value) || 20;
+  const chunkSelect = document.getElementById('config-chunk-select');
+  chunkSelect.innerHTML = '';
+  
+  if (filtered.length === 0) {
+    chunkSelect.innerHTML = '<option value="0">データがありません</option>';
+    return;
+  }
+
+  const numChunks = Math.ceil(filtered.length / chunkSize);
+  for (let i = 0; i < numChunks; i++) {
+    const start = i * chunkSize + 1;
+    const end = Math.min((i + 1) * chunkSize, filtered.length);
+    chunkSelect.innerHTML += `<option value="${i}">第${i + 1}セット (${start}〜${end}問)</option>`;
+  }
+}
+
+async function prepareConfigScreen() {
+  const cards = await getAllFromStore('cards');
+  const configForm = document.querySelector('.config-form');
+  let spanSelect = document.getElementById('config-span');
+  
+  if (AppState.entryType === 'weak') {
+    if (!spanSelect) {
+      const label = document.createElement('label');
+      label.id = 'label-config-span';
+      label.innerHTML = `集計期間: <select id="config-span"><option value="30">直近30日</option><option value="7">直近7日</option><option value="90">直近90日</option><option value="all">全期間</option></select>`;
+      configForm.insertBefore(label, document.getElementById('filter-flags').parentElement.previousElementSibling);
+    }
+  } else {
+    if (spanSelect) document.getElementById('label-config-span').remove();
+  }
+
+  // 設備分類チェックボックスの生成 (初回のみ)
+  const eqContainer = document.getElementById('filter-equipments');
+  if (eqContainer.innerHTML === '') {
+    const eqSet = new Set();
+    cards.forEach(c => {
+      if (c.equipmentCategory) c.equipmentCategory.forEach(eq => eqSet.add(eq));
+    });
+    eqSet.forEach(eq => {
+      eqContainer.innerHTML += `<label class="checkbox-label"><input type="checkbox" value="${eq}" class="chk-eq"> ${eq}</label>`;
+    });
+  }
+  
+  // 画面を開くたびにプレビューを計算して表示
+  await updateConfigPreview();
 }
 
 // ==========================================
@@ -525,7 +619,29 @@ async function generateCardsForSession() {
 async function startSession() {
   const mode = document.getElementById('config-mode').value;
   AppState.session.mode = mode;
-  const cards = await generateCardsForSession();
+  
+  let cards = await getFilteredCards();
+  const extractType = document.querySelector('input[name="extract-type"]:checked').value;
+
+  if (extractType === 'random') {
+    // ランダム抽出の場合はシャッフルして出題数分スライス
+    cards.sort(() => Math.random() - 0.5);
+    const countSelect = document.getElementById('config-count').value;
+    if (countSelect !== 'all') {
+      cards = cards.slice(0, parseInt(countSelect));
+    }
+  } else {
+    // 区間(セット)抽出の場合は順番を維持して指定範囲をスライス
+    const chunkSize = parseInt(document.getElementById('config-chunk-size').value);
+    const chunkIndex = parseInt(document.getElementById('config-chunk-select').value);
+    if (!isNaN(chunkIndex)) {
+      const start = chunkIndex * chunkSize;
+      const end = start + chunkSize;
+      cards = cards.slice(start, end);
+    } else {
+      cards =[];
+    }
+  }
   
   if (cards.length === 0) return alert("条件・絞り込みに一致する問題がありません！");
 
@@ -570,7 +686,6 @@ function renderCard() {
     sysBadge.style.display = 'none';
   }
 
-  // ★DBからフラグ状態を非同期で取得しUIへ反映
   const tx = db.transaction('progress', 'readonly');
   const req = tx.objectStore('progress').get(card.id);
   req.onsuccess = () => {
