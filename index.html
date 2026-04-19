@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>暗記カード学習アプリ</title>
+  <title>暗記カード学習</title>
   <style>
     /* 共通変数・テーマ設定 */
     :root {
@@ -44,12 +44,24 @@
     .success-btn:hover:not(:disabled) { background: var(--success-hover); }
     .warning-btn { background: var(--warning-color); color: white; border: none; }
 
-    /* 自己評価フラグボタン */
     .flag-btn { background: transparent; border: 1px solid var(--border-color); color: var(--text-color); padding: 6px 10px; border-radius: 20px; font-size: 0.85rem; cursor: pointer; transition: 0.2s; flex-direction: row; gap: 5px; box-shadow: none; }
     .flag-btn:hover { background: var(--border-color); }
     .flag-btn[data-flag="uneasy"].active { background: #fef08a; border-color: #facc15; color: #854d0e; }
-    .flag-btn[data-flag="mistake"].active { background: #fecaca; border-color: #f87171; color: #991b1b; }
-    [data-theme="dark"] .flag-btn[data-flag="uneasy"].active { background: #854d0e; border-color: #facc15; color: #fef08a; }[data-theme="dark"] .flag-btn[data-flag="mistake"].active { background: #991b1b; border-color: #f87171; color: #fecaca; }
+    .flag-btn[data-flag="mistake"].active { background: #fecaca; border-color: #f87171; color: #991b1b; }[data-theme="dark"] .flag-btn[data-flag="uneasy"].active { background: #854d0e; border-color: #facc15; color: #fef08a; }[data-theme="dark"] .flag-btn[data-flag="mistake"].active { background: #991b1b; border-color: #f87171; color: #fecaca; }
+
+    .home-summary { background: var(--card-bg); padding: 15px; border-radius: 12px; box-shadow: var(--shadow); margin-bottom: 20px; }
+    .home-summary-title { font-weight: bold; margin-bottom: 10px; text-align: center; }
+    .home-summary-tags { display: flex; flex-wrap: wrap; gap: 5px; justify-content: center; }
+    .home-summary-tag { background: var(--bg-color); border: 1px solid var(--border-color); padding: 5px 12px; border-radius: 15px; font-size: 0.85rem; }
+
+    .folder-header { cursor: pointer; user-select: none; padding: 12px 15px; background: var(--card-bg); border-radius: 8px; margin: 0 0 10px; border-left: 5px solid var(--primary-color); display: flex; align-items: center; justify-content: space-between; font-size: 1.1rem; box-shadow: 0 1px 3px rgba(0,0,0,0.1); transition: background 0.2s; }
+    .folder-header:hover { background: var(--bg-color); }
+    .folder-header::after { content: "▼"; font-size: 0.8rem; transition: transform 0.3s; }
+    .folder-header.closed::after { transform: rotate(-90deg); }
+    .folder-content.closed { display: none; }
+    .set-preview-container { background: var(--bg-color); border: 1px solid var(--border-color); border-radius: 8px; padding: 10px; margin-top: 10px; max-height: 250px; overflow-y: auto; font-size: 0.9rem; text-align: left;}
+    .set-preview-item { border-bottom: 1px solid var(--border-color); padding: 6px 0; }
+    .set-preview-item:last-child { border-bottom: none; }
 
     .menu { display: grid; gap: 15px; grid-template-columns: 1fr; margin-top: 20px; }
     @media (min-width: 600px) { .menu { grid-template-columns: 1fr 1fr; } }
@@ -61,7 +73,6 @@
     
     .session-header { display: flex; justify-content: space-between; font-weight: bold; padding: 0 10px; font-size: 1.1rem; }
     .session-controls { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr 1fr; gap: 8px; }
-    
     .badge { display: inline-block; padding: 6px 12px; font-size: 0.85rem; background: var(--border-color); border-radius: 20px; margin: 0 4px; }
     #user-answer-input { width: 100%; padding: 12px; margin: 15px 0; font-size: 1.2rem; border: 2px solid var(--border-color); border-radius: 8px; text-align: center; display: block; background: var(--bg-color); color: var(--text-color); }
 
@@ -78,11 +89,8 @@
     .checkbox-label { display: flex; align-items: center; gap: 5px; background: var(--bg-color); padding: 5px 10px; border-radius: 20px; font-size: 0.9rem; cursor: pointer; border: 1px solid var(--border-color); user-select: none; }
     .checkbox-label:hover { border-color: var(--primary-color); }
     
-    /* 抽出方法のラジオボタン */
     .radio-group { display: flex; flex-direction: column; gap: 10px; margin-bottom: 15px; }
     .radio-label { display: flex; align-items: center; gap: 8px; cursor: pointer; font-weight: normal; }
-
-    /* リアルタイム件数表示 */
     .target-count-box { background: var(--primary-color); color: white; padding: 10px; border-radius: 8px; text-align: center; font-size: 1.1rem; font-weight: bold; margin-bottom: 20px; }
 
     .stat-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 20px; }
@@ -90,36 +98,43 @@
     .stat-card h4 { margin: 0 0 10px; font-size: 1rem; color: #6b7280; }
     .stat-card .value { font-size: 1.8rem; font-weight: bold; color: var(--primary-color); }
 
+    /* モーダル汎用 */
     .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); align-items: center; justify-content: center; z-index: 1000; padding: 20px; }
     .modal.active { display: flex; }
-    .modal-content { background: var(--card-bg); padding: 30px; border-radius: 16px; text-align: center; max-width: 400px; width: 100%; box-shadow: var(--shadow); }
+    .modal-content { background: var(--card-bg); padding: 30px; border-radius: 16px; text-align: center; max-width: 400px; width: 100%; box-shadow: var(--shadow); max-height: 90vh; overflow-y: auto;}
     .modal-actions { display: flex; gap: 10px; justify-content: center; margin-top: 20px; }
+    
+    /* マッピング設定専用デザイン */
+    .mapping-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; font-size: 0.95rem; }
+    .mapping-label { font-weight: bold; width: 40%; text-align: right; padding-right: 15px; }
+    .mapping-select { width: 60%; padding: 6px; border-radius: 6px; border: 1px solid var(--border-color); background: var(--bg-color); color: var(--text-color); }
   </style>
 </head>
 <body data-theme="light">
 
   <div id="screen-home" class="screen active">
-    <h1>暗記カード学習アプリ</h1>
+    <h1>暗記カード学習</h1>
+    <div class="home-summary" id="home-data-summary">
+      <div style="text-align:center;">データを読み込んでいます...</div>
+    </div>
     <div class="menu">
       <button class="menu-btn" data-target="config" data-entry="normal">📖 通常学習</button>
       <button class="menu-btn" data-target="config" data-entry="wrong">⚠️ 間違いを見直し</button>
       <button class="menu-btn" data-target="config" data-entry="weak">📉 苦手な問題</button>
       <button class="menu-btn" data-target="config" data-entry="stale">⏳ 最近未回答</button>
       <button class="menu-btn" id="btn-go-analytics" style="background: var(--success-color); color: white;">📊 学習分析</button>
+      <button class="menu-btn" id="btn-go-list">📋 データ一覧</button>
       <button class="menu-btn" data-target="settings">⚙️ 設定</button>
     </div>
   </div>
 
-  <!-- データ一覧画面 (カテゴライズ表示に対応) -->
   <div id="screen-list" class="screen" style="max-width: 1100px;">
-    <h2>📋 データ一覧</h2>
+    <h2>📋 データ一覧 (設備分類別)</h2>
     <div style="display: flex; justify-content: space-between; margin-bottom: 15px; flex-wrap: wrap; gap: 10px;">
       <label>設備分類: <select id="list-category-filter" style="padding: 5px; border-radius: 5px;"><option value="all">すべて</option></select></label>
       <span>合計: <strong id="list-total-count">0</strong> 件</span>
     </div>
-    <!-- ★ここに設備ごとのテーブルが動的生成されます -->
     <div id="data-list-container"></div>
-    
     <div style="text-align: center; margin-top: 20px;"><button class="nav-home" style="flex-direction:row;">ホームに戻る</button></div>
   </div>
 
@@ -134,37 +149,30 @@
       <div class="table-responsive">
         <table id="analytics-cat-table">
           <thead><tr><th>設備分類</th><th>問題数</th><th>学習済</th><th>正答率</th></tr></thead>
-          <tbody><!-- 動的生成 --></tbody>
+          <tbody></tbody>
         </table>
       </div>
     </div>
-    
     <div class="settings-section">
       <h3 style="color: var(--danger-color); margin-top:0;">⚠️ 間違えた問題リスト (設備分類別)</h3>
       <div id="analytics-wrong-container"></div>
     </div>
-    
     <div style="text-align: center;"><button class="nav-home" style="flex-direction:row;">ホームに戻る</button></div>
   </div>
 
-  <!-- 学習条件設定画面 (★区間・セット指定 UIの追加) -->
   <div id="screen-config" class="screen">
     <h2>学習条件の設定</h2>
     <div class="settings-section config-form">
       <h3 style="margin-top: 0;">🔍 1. 出題の絞り込み</h3>
-      
       <label>自己評価マーク:</label>
       <div id="filter-flags" class="checkbox-group">
         <label class="checkbox-label"><input type="checkbox" value="uneasy" class="chk-flag"> 😰 不安</label>
         <label class="checkbox-label"><input type="checkbox" value="mistake" class="chk-flag"> ⚠️ ミス注意</label>
       </div>
-
       <label>設備分類:</label>
       <div id="filter-equipments" class="checkbox-group"></div>
       
-      <!-- リアルタイム該当件数表示 -->
       <div class="target-count-box" id="config-target-count-display">絞り込み対象: 計算中...</div>
-
       <hr style="border: 0; border-top: 1px solid var(--border-color); margin: 20px 0;">
 
       <h3 style="margin-top: 0;">🎯 2. 出題範囲の指定</h3>
@@ -173,30 +181,21 @@
         <label class="radio-label"><input type="radio" name="extract-type" value="random" checked> 🎲 ランダムに抽出する</label>
         <label class="radio-label"><input type="radio" name="extract-type" value="range"> 📑 区間（セット）を分けて順番に出題する</label>
       </div>
-
-      <!-- ランダム抽出用のオプション -->
       <div id="config-opt-random">
         <label>出題数:
-          <select id="config-count">
-            <option value="all">すべて</option><option value="10">10問</option><option value="20">20問</option><option value="50">50問</option>
-          </select>
+          <select id="config-count"><option value="all">すべて</option><option value="10">10問</option><option value="20">20問</option><option value="50">50問</option></select>
         </label>
       </div>
-
-      <!-- 区間（セット）抽出用のオプション (初期非表示) -->
       <div id="config-opt-range" style="display:none; background: var(--bg-color); padding: 15px; border-radius: 8px;">
         <label>1セットの区切り:
-          <select id="config-chunk-size">
-            <option value="10">10問ずつ</option><option value="20" selected>20問ずつ</option><option value="50">50問ずつ</option><option value="100">100問ずつ</option>
-          </select>
+          <select id="config-chunk-size"><option value="10">10問ずつ</option><option value="20" selected>20問ずつ</option><option value="50">50問ずつ</option><option value="100">100問ずつ</option></select>
         </label>
         <label>学習するセットを選択:
-          <select id="config-chunk-select">
-            <option value="0">データがありません</option>
-          </select>
+          <select id="config-chunk-select"><option value="0">データがありません</option></select>
         </label>
+        <button id="btn-toggle-preview" style="width: 100%; margin-top: 10px; padding: 8px; font-size: 0.95rem; background: var(--card-bg); border: 1px solid var(--primary-color); border-radius: 6px; color: var(--primary-color); flex-direction:row; gap:5px;">👀 このセットの問題を確認する</button>
+        <div id="config-set-preview" class="set-preview-container" style="display: none;"></div>
       </div>
-
       <hr style="border: 0; border-top: 1px solid var(--border-color); margin: 20px 0;">
 
       <label>学習モード:</label>
@@ -207,7 +206,6 @@
         <option value="rev2">Rev2 (日本語表示 / 略語入力)</option>
         <option value="test">テスト (ランダム・時間制限)</option>
       </select>
-
       <div style="display: flex; gap: 10px; margin-top: 25px;">
         <button id="btn-start-session" class="primary-btn" style="flex:1; flex-direction:row;">スタート</button>
         <button class="nav-home" style="flex:1; flex-direction:row;">戻る</button>
@@ -220,26 +218,19 @@
       <span id="session-progress">0 / 0</span>
       <span id="session-timer" style="display:none; color: var(--danger-color);">⏳ 00:00</span>
     </div>
-    
     <div class="card-area">
       <div class="card-top-row">
-        <div id="card-badges">
-          <span id="badge-equipment" class="badge"></span>
-          <span id="badge-system" class="badge"></span>
-        </div>
+        <div id="card-badges"><span id="badge-equipment" class="badge"></span><span id="badge-system" class="badge"></span></div>
         <div id="card-flags" style="display:flex; gap:5px;">
           <button class="flag-btn toggle-flag-btn" id="session-flag-uneasy" data-flag="uneasy" title="不安">😰 不安</button>
           <button class="flag-btn toggle-flag-btn" id="session-flag-mistake" data-flag="mistake" title="間違えやすい">⚠️ ミス注意</button>
         </div>
       </div>
-      
       <h2 id="card-question"></h2>
-      
       <div id="card-input-section" style="display:none; width: 100%;">
         <input type="text" id="user-answer-input" autocomplete="off" placeholder="答えを入力...">
         <div id="judgment-result" style="font-size: 1.2rem; font-weight:bold; margin-bottom:10px;"></div>
       </div>
-      
       <div id="card-details" style="display:none; background: var(--bg-color); padding: 15px; border-radius: 10px; margin-top: auto; text-align: left; width: 100%;">
         <h3 id="card-answer" style="color:var(--primary-color); text-align: center; margin-top:0;"></h3>
         <p style="margin:5px 0;"><strong>フルスペル:</strong> <span id="card-fullspell"></span></p>
@@ -247,7 +238,6 @@
         <p style="margin:5px 0;"><strong>概要:</strong> <span id="card-overview"></span></p>
       </div>
     </div>
-    
     <div class="session-controls">
       <button id="btn-prev"><span>◀ 前へ</span><span class="shortcut-key">[1]</span></button>
       <button id="btn-ans" class="primary-btn"><span>ANS判定</span><span class="shortcut-key">[2/Enter]</span></button>
@@ -273,18 +263,15 @@
     <h2>⚙️ 設定</h2>
     <div class="settings-section">
       <h3>① 問題データの更新 (CSV)</h3>
-      <p style="font-size: 0.85rem; color: #666;">形式: 設備分類, 対象号機, 系統番号, 略語, フルスペル, 日本語, 概略, 概要</p>
+      <p style="font-size: 0.85rem; color: #666; margin-bottom:10px;">列名が違っても次の画面で割り当てを修正できます。</p>
       <input type="file" id="csv-upload" accept=".csv">
-      <button id="btn-import-csv" class="primary-btn" style="width:100%; margin-top:10px; flex-direction:row;">CSVをインポート</button>
+      <button id="btn-trigger-mapping" class="primary-btn" style="width:100%; margin-top:10px; flex-direction:row;">CSVを読み込む</button>
       <p id="import-msg" style="text-align: center; font-weight: bold; margin-top: 10px;"></p>
     </div>
     <div class="settings-section">
       <h3>② データのバックアップ・復元</h3>
       <div style="margin-bottom: 15px; text-align: left;">
-        <label style="display: flex; align-items: center; gap: 5px; cursor: pointer; margin-bottom: 10px;">
-          <input type="checkbox" id="backup-include-cards" checked>
-          問題データも含めて保存する
-        </label>
+        <label style="display: flex; align-items: center; gap: 5px; cursor: pointer; margin-bottom: 10px;"><input type="checkbox" id="backup-include-cards" checked>問題データも含めて保存する</label>
         <button id="btn-export-backup" class="primary-btn" style="width:100%; flex-direction:row;">バックアップをダウンロード</button>
       </div>
       <hr style="border: 0; border-top: 1px solid var(--border-color); margin: 15px 0;">
@@ -308,6 +295,24 @@
       </label>
     </div>
     <div style="text-align: center;"><button class="nav-home" style="flex-direction:row;">ホームに戻る</button></div>
+  </div>
+
+  <!-- ★ CSVインポート時のマッピング設定モーダル (NEW) -->
+  <div id="modal-csv-mapping" class="modal">
+    <div class="modal-content" style="max-width: 550px; text-align: left;">
+      <h3 style="text-align: center; margin-top:0;">CSV列の割り当て (マッピング)</h3>
+      <p style="font-size: 0.85rem; margin-bottom: 15px; color:#666;">
+        CSVの列（ヘッダー）とアプリの項目を紐づけてください。<br>
+        <span style="color:var(--danger-color);">※「略語」と「日本語」は必須です。</span>割り当てない項目は「（使用しない）」を選んでください。
+      </p>
+      <div id="csv-mapping-container" style="display: flex; flex-direction: column; gap: 10px;">
+        <!-- JSで動的に生成 -->
+      </div>
+      <div class="modal-actions" style="margin-top: 25px;">
+        <button id="btn-execute-import" class="primary-btn" style="flex:1; flex-direction:row;">インポート実行</button>
+        <button id="btn-cancel-import" style="flex:1; flex-direction:row;">キャンセル</button>
+      </div>
+    </div>
   </div>
 
   <div id="modal-exit" class="modal">
