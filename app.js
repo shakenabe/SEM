@@ -7,10 +7,11 @@ const AppState = {
   session: {
     cards:[], currentIndex: 0, mode: 'normal', 
     startTime: 0, timerInterval: null, timeRemaining: 0, results:[]
-  }
+  },
+  lastSession: null // 「もう一度」機能のために前回のセッション設定を保持
 };
 
-let currentCsvText = ''; // インポート時のCSVテキスト一時保持用
+let currentCsvText = '';
 
 // ==========================================
 // ユーティリティ関数
@@ -27,11 +28,10 @@ function showScreen(screenId) {
   AppState.currentScreen = screenId;
   window.scrollTo(0, 0);
 
-  if (screenId === 'home') {
-    updateHomeSummary();
-  }
+  if (screenId === 'home') updateHomeSummary();
 }
 
+// ★ 確認モーダル（キーボード対応）
 function confirmAction(title, message) {
   return new Promise((resolve) => {
     document.getElementById('confirm-title').textContent = title;
@@ -45,13 +45,26 @@ function confirmAction(title, message) {
     const handleYes = () => { cleanup(); resolve(true); };
     const handleNo = () => { cleanup(); resolve(false); };
 
+    // モーダル表示中のキーボード操作 (Y/EnterでYes, N/EscでNo)
+    const handleKeydown = (e) => {
+      if (e.key === 'Enter' || e.key.toLowerCase() === 'y') {
+        e.preventDefault(); e.stopPropagation(); handleYes();
+      } else if (e.key === 'Escape' || e.key.toLowerCase() === 'n') {
+        e.preventDefault(); e.stopPropagation(); handleNo();
+      }
+    };
+
     function cleanup() {
       modal.classList.remove('active');
       btnYes.removeEventListener('click', handleYes);
       btnNo.removeEventListener('click', handleNo);
+      document.removeEventListener('keydown', handleKeydown, true);
     }
+    
     btnYes.addEventListener('click', handleYes);
     btnNo.addEventListener('click', handleNo);
+    // キャプチャフェーズでイベントを拾い、他の処理より優先させる
+    document.addEventListener('keydown', handleKeydown, true);
   });
 }
 
@@ -70,9 +83,7 @@ async function updateHomeSummary() {
   const eqMap = {};
   cards.forEach(c => {
     const eqs = (c.equipmentCategory && c.equipmentCategory.length > 0) ? c.equipmentCategory : ['分類なし'];
-    eqs.forEach(eq => {
-      eqMap[eq] = (eqMap[eq] || 0) + 1;
-    });
+    eqs.forEach(eq => { eqMap[eq] = (eqMap[eq] || 0) + 1; });
   });
 
   let tagsHtml = '';
@@ -106,7 +117,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
   document.querySelectorAll('.nav-home').forEach(btn => btn.addEventListener('click', () => showScreen('home')));
   document.getElementById('btn-go-analytics').addEventListener('click', renderAnalyticsScreen);
-  
   const btnList = document.getElementById('btn-go-list');
   if(btnList) btnList.addEventListener('click', renderListScreen);
 
@@ -124,6 +134,8 @@ document.addEventListener('DOMContentLoaded', () => {
     endSession();
   });
 
+  // ★ 結果画面のボタン操作
+  document.getElementById('btn-retry-session').addEventListener('click', retrySession); // もう一度
   document.getElementById('btn-review-wrong').addEventListener('click', async () => {
     AppState.entryType = 'wrong';
     await prepareConfigScreen();
@@ -193,10 +205,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   document.getElementById('btn-toggle-preview').addEventListener('click', async () => {
     const previewDiv = document.getElementById('config-set-preview');
-    if (previewDiv.style.display === 'block') {
-      previewDiv.style.display = 'none';
-      return;
-    }
+    if (previewDiv.style.display === 'block') { previewDiv.style.display = 'none'; return; }
     
     let cards = await getFilteredCards();
     const chunkSize = parseInt(document.getElementById('config-chunk-size').value);
@@ -206,9 +215,13 @@ document.addEventListener('DOMContentLoaded', () => {
       const start = chunkIndex * chunkSize;
       const end = start + chunkSize;
       cards = cards.slice(start, end);
-    } else {
-      cards =[];
-    }
+    } else { cards =[]; }
+
+    // ★ プレビュー時も「順番」の設定を反映
+    const order = document.getElementById('config-chunk-order').value;
+    if (order === 'reverse') cards.reverse();
+    // ランダムプレビューは見え方が毎回変わるのでそのまま表示が好ましい場合も。今回は反映する。
+    if (order === 'random') cards = [...cards].sort(() => Math.random() - 0.5);
 
     if (cards.length === 0) {
       previewDiv.innerHTML = '<div style="text-align:center; padding:10px;">問題がありません</div>';
@@ -222,10 +235,7 @@ document.addEventListener('DOMContentLoaded', () => {
     previewDiv.style.display = 'block';
   });
 
-
-  // ==========================================
-  // ★CSVインポート（マッピング）関連
-  // ==========================================
+  // ========== CSVインポート＆バックアップ関連 ==========
   const triggerImportBtn = document.getElementById('btn-trigger-mapping');
   const fileInput = document.getElementById('csv-upload');
   const msgEl = document.getElementById('import-msg');
@@ -233,15 +243,12 @@ document.addEventListener('DOMContentLoaded', () => {
   triggerImportBtn.addEventListener('click', () => {
     const file = fileInput.files[0];
     if (!file) { msgEl.style.color = "var(--danger-color)"; msgEl.textContent = "ファイルを選択してください。"; return; }
-    
     const reader = new FileReader();
     reader.onload = (e) => {
       currentCsvText = e.target.result;
       const rows = window.parseCSV(currentCsvText);
-      if(rows.length < 2) {
-        msgEl.style.color = "var(--danger-color)"; msgEl.textContent = "データがありません。"; return;
-      }
-      openMappingModal(rows[0]); // 1行目(ヘッダー)を渡す
+      if(rows.length < 2) { msgEl.style.color = "var(--danger-color)"; msgEl.textContent = "データがありません。"; return; }
+      openMappingModal(rows[0]);
     };
     reader.readAsText(file);
   });
@@ -249,8 +256,6 @@ document.addEventListener('DOMContentLoaded', () => {
   function openMappingModal(headers) {
     const container = document.getElementById('csv-mapping-container');
     container.innerHTML = '';
-    
-    // アプリ側の項目定義と自動推定用のキーワード
     const appFields =[
       { key: 'equipmentCategory', label: '設備分類', keywords: ['設備', '分類', 'カテゴリ'] },
       { key: 'targetMachine', label: '対象号機', keywords:['号機', '対象', '機器'] },
@@ -261,11 +266,9 @@ document.addEventListener('DOMContentLoaded', () => {
       { key: 'outline', label: '概略', keywords: ['概略'] },
       { key: 'overview', label: '概要', keywords: ['概要', '役割', '詳細', '解説'] }
     ];
-    
     appFields.forEach(field => {
       const row = document.createElement('div');
       row.className = 'mapping-row';
-      
       const label = document.createElement('div');
       label.className = 'mapping-label';
       label.textContent = field.label;
@@ -274,36 +277,23 @@ document.addEventListener('DOMContentLoaded', () => {
       const select = document.createElement('select');
       select.className = 'mapping-select';
       select.dataset.key = field.key;
-      
       const optNone = document.createElement('option');
-      optNone.value = '-1';
-      optNone.textContent = '（使用しない）';
+      optNone.value = '-1'; optNone.textContent = '（使用しない）';
       select.appendChild(optNone);
       
       let bestMatchIdx = -1;
       headers.forEach((h, idx) => {
         const opt = document.createElement('option');
-        opt.value = idx;
-        opt.textContent = `[列${idx + 1}] ${h}`;
+        opt.value = idx; opt.textContent = `[列${idx + 1}] ${h}`;
         select.appendChild(opt);
-        
-        // ヘッダー名から自動推定
         if(bestMatchIdx === -1) {
-          if (h.includes(field.label)) {
-            bestMatchIdx = idx;
-          } else if (field.keywords && field.keywords.some(kw => h.includes(kw))) {
-            bestMatchIdx = idx;
-          }
+          if (h.includes(field.label)) bestMatchIdx = idx;
+          else if (field.keywords && field.keywords.some(kw => h.includes(kw))) bestMatchIdx = idx;
         }
       });
-      
       if(bestMatchIdx !== -1) select.value = bestMatchIdx;
-      
-      row.appendChild(label);
-      row.appendChild(select);
-      container.appendChild(row);
+      row.appendChild(label); row.appendChild(select); container.appendChild(row);
     });
-    
     document.getElementById('modal-csv-mapping').classList.add('active');
   }
 
@@ -316,50 +306,35 @@ document.addEventListener('DOMContentLoaded', () => {
     const selects = document.querySelectorAll('.mapping-select');
     const mapping = {};
     let abbrMapped = false, jaMapped = false;
-    
     selects.forEach(sel => {
-      const key = sel.dataset.key;
-      const val = parseInt(sel.value, 10);
+      const key = sel.dataset.key; const val = parseInt(sel.value, 10);
       mapping[key] = val;
       if(key === 'abbr' && val !== -1) abbrMapped = true;
       if(key === 'ja' && val !== -1) jaMapped = true;
     });
-    
-    if(!abbrMapped || !jaMapped) {
-      alert("「略語」と「日本語」の列は必須です。いずれかの列を割り当ててください。");
-      return;
-    }
+    if(!abbrMapped || !jaMapped) { alert("「略語」と「日本語」の列は必須です。"); return; }
     
     document.getElementById('modal-csv-mapping').classList.remove('active');
-    
     try {
-      const result = await importCSV(currentCsvText, mapping); // マッピング情報を渡す
+      const result = await importCSV(currentCsvText, mapping);
       msgEl.style.color = "var(--success-color)"; 
       msgEl.textContent = `成功！ 更新: ${result.updated}件 / 削除: ${result.deleted}件`;
       localStorage.setItem('lastDataUpdate', Date.now().toString());
       updateHomeSummary();
-    } catch (err) {
-      msgEl.style.color = "var(--danger-color)"; 
-      msgEl.textContent = "エラー: " + err.message;
-    }
+    } catch (err) { msgEl.style.color = "var(--danger-color)"; msgEl.textContent = "エラー: " + err.message; }
     currentCsvText = '';
   });
 
-
-  // ========== バックアップ＆リセット関連 ==========
   document.getElementById('btn-export-backup').addEventListener('click', async () => {
     try {
       const includeCards = document.getElementById('backup-include-cards').checked;
       const jsonStr = await exportBackup(includeCards);
       const blob = new Blob([jsonStr], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
+      const a = document.createElement('a'); a.href = url;
       const d = new Date();
-      const dateStr = `${d.getFullYear()}${(d.getMonth()+1).toString().padStart(2,'0')}${d.getDate().toString().padStart(2,'0')}_${d.getHours().toString().padStart(2,'0')}${d.getMinutes().toString().padStart(2,'0')}`;
-      a.download = `flashcard_backup_${dateStr}.json`;
-      a.click();
-      URL.revokeObjectURL(url);
+      a.download = `flashcard_backup_${d.getFullYear()}${(d.getMonth()+1).toString().padStart(2,'0')}${d.getDate().toString().padStart(2,'0')}_${d.getHours().toString().padStart(2,'0')}${d.getMinutes().toString().padStart(2,'0')}.json`;
+      a.click(); URL.revokeObjectURL(url);
       localStorage.setItem('lastBackupTimestamp', Date.now().toString());
       alert('バックアップをダウンロードしました。');
     } catch (err) { alert('バックアップ失敗: ' + err.message); }
@@ -369,20 +344,17 @@ document.addEventListener('DOMContentLoaded', () => {
     const fileIn = document.getElementById('backup-upload');
     const msg = document.getElementById('backup-msg');
     const file = fileIn.files[0];
-    if (!file) { msg.style.color = "var(--danger-color)"; msg.textContent = "JSONを選択してください。"; return; }
+    if (!file) return;
     const reader = new FileReader();
     reader.onload = async (e) => {
       try {
-        const jsonStr = e.target.result;
-        const backupData = JSON.parse(jsonStr);
+        const jsonStr = e.target.result; const backupData = JSON.parse(jsonStr);
         const lastTime = parseInt(localStorage.getItem('lastBackupTimestamp') || localStorage.getItem('lastDataUpdate') || '0', 10);
 
         if (lastTime > 0 && backupData.timestamp < lastTime) {
-          const ok = await confirmAction('⚠️ 警告: 古いバックアップです', 'このデータは前回保存した時より古い可能性があります。\n本当に復元しますか？');
-          if (!ok) return;
+          if (!await confirmAction('⚠️ 警告: 古いバックアップです', '前回保存した時より古いデータです。\n本当に復元しますか？')) return;
         } else {
-          const ok = await confirmAction('バックアップの復元', '現在の学習履歴が上書きされます。\n実行してよろしいですか？');
-          if (!ok) return;
+          if (!await confirmAction('バックアップの復元', '現在の学習履歴が上書きされます。\n実行してよろしいですか？')) return;
         }
 
         await importBackup(jsonStr);
@@ -403,8 +375,7 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('btn-reset-all').addEventListener('click', async () => {
     if(await confirmAction('全データ完全リセット', '問題データと履歴を【すべて】削除しますか？')) {
       await clearStore('cards'); await clearStore('progress'); await clearStore('attempts'); 
-      updateHomeSummary();
-      alert('全リセットしました。');
+      updateHomeSummary(); alert('全リセットしました。');
     }
   });
 
@@ -423,8 +394,19 @@ document.addEventListener('DOMContentLoaded', () => {
 // ⌨️ キーボードショートカット
 // ==========================================
 document.addEventListener('keydown', (e) => {
+  // ★ モーダルが出ている場合は終了確認の操作を優先
+  const exitModal = document.getElementById('modal-exit');
+  if (exitModal.classList.contains('active')) {
+    if (e.key === 'Enter' || e.key.toLowerCase() === 'y') {
+      e.preventDefault(); e.stopPropagation(); document.getElementById('btn-modal-yes').click();
+    } else if (e.key === 'Escape' || e.key.toLowerCase() === 'n') {
+      e.preventDefault(); e.stopPropagation(); document.getElementById('btn-modal-no').click();
+    }
+    return;
+  }
+  // ※ Confirmモーダルは confirmAction 内でリッスン済みのため、ここでは除外
+
   if (AppState.currentScreen !== 'session') return;
-  if (document.getElementById('modal-exit').classList.contains('active')) return;
 
   const state = AppState.session.results[AppState.session.currentIndex];
   const isInputFocused = document.activeElement && document.activeElement.id === 'user-answer-input';
@@ -435,7 +417,8 @@ document.addEventListener('keydown', (e) => {
     else document.getElementById('btn-next').click();
     return;
   }
-  if (isInputFocused) return;
+  
+  if (isInputFocused) return; // 入力欄フォーカス中は数字キー無効
 
   switch (e.key) {
     case '1': document.getElementById('btn-prev').click(); break;
@@ -491,8 +474,7 @@ async function renderListTable() {
   document.getElementById('list-total-count').textContent = count;
 
   if (Object.keys(grouped).length === 0) {
-    container.innerHTML = '<p style="text-align:center; padding:20px;">データがありません</p>';
-    return;
+    container.innerHTML = '<p style="text-align:center; padding:20px;">データがありません</p>'; return;
   }
 
   Object.keys(grouped).sort().forEach(eq => {
@@ -509,12 +491,7 @@ async function renderListTable() {
     content.style.marginBottom = '0';
     
     const table = document.createElement('table');
-    table.innerHTML = `
-      <thead>
-        <tr><th style="min-width: 90px;">マーク</th><th>対象号機</th><th>系統</th><th>略語</th><th>フルスペル</th><th>日本語</th><th>概略</th><th>概要</th></tr>
-      </thead>
-      <tbody></tbody>
-    `;
+    table.innerHTML = `<thead><tr><th style="min-width: 90px;">マーク</th><th>対象号機</th><th>系統</th><th>略語</th><th>フルスペル</th><th>日本語</th><th>概略</th><th>概要</th></tr></thead><tbody></tbody>`;
     const tbody = table.querySelector('tbody');
     
     gCards.forEach(c => {
@@ -528,21 +505,13 @@ async function renderListTable() {
           <button class="flag-btn toggle-flag-btn ${uAct}" data-id="${c.id}" data-flag="uneasy" title="不安">😰</button>
           <button class="flag-btn toggle-flag-btn ${mAct}" data-id="${c.id}" data-flag="mistake" title="ミス注意">⚠️</button>
         </td>
-        <td>${c.targetMachine || ''}</td>
-        <td>${c.systemNumber || ''}</td>
-        <td><strong>${c.abbr || ''}</strong></td>
-        <td>${c.fullSpell || ''}</td>
-        <td><strong>${c.ja || ''}</strong></td>
-        <td>${c.outline || ''}</td>
-        <td>${c.overview || ''}</td>
+        <td>${c.targetMachine || ''}</td><td>${c.systemNumber || ''}</td><td><strong>${c.abbr || ''}</strong></td>
+        <td>${c.fullSpell || ''}</td><td><strong>${c.ja || ''}</strong></td><td>${c.outline || ''}</td><td>${c.overview || ''}</td>
       `;
       tbody.appendChild(tr);
     });
     
-    content.appendChild(table);
-    wrapper.appendChild(header);
-    wrapper.appendChild(content);
-    container.appendChild(wrapper);
+    content.appendChild(table); wrapper.appendChild(header); wrapper.appendChild(content); container.appendChild(wrapper);
   });
 }
 
@@ -573,7 +542,6 @@ async function renderAnalyticsScreen() {
       learnedCards++;
       totalCorrect += (p.correctCount || 0);
       totalWrong += (p.wrongCount || 0);
-
       (c.equipmentCategory ||[]).forEach(eq => {
         statsMap['e_' + eq].learned++;
         statsMap['e_' + eq].correct += p.correctCount || 0;
@@ -605,7 +573,7 @@ async function renderAnalyticsScreen() {
   } else {
     const grouped = {};
     wrongCards.forEach(c => {
-      const eqs = (c.equipmentCategory && c.equipmentCategory.length > 0) ? c.equipmentCategory : ['分類なし'];
+      const eqs = (c.equipmentCategory && c.equipmentCategory.length > 0) ? c.equipmentCategory :['分類なし'];
       eqs.forEach(eq => {
         if(!grouped[eq]) grouped[eq] =[];
         grouped[eq].push(c);
@@ -618,7 +586,6 @@ async function renderAnalyticsScreen() {
       
       const wrapper = document.createElement('div');
       wrapper.style.marginBottom = '15px';
-      
       const header = document.createElement('div');
       header.className = 'folder-header closed';
       header.innerHTML = `📁 ${eq} <span style="font-size:0.9rem; font-weight:normal;">(${gCards.length}件)</span>`;
@@ -628,44 +595,34 @@ async function renderAnalyticsScreen() {
       content.style.marginBottom = '0';
       
       const table = document.createElement('table');
-      table.innerHTML = `
-        <thead>
-          <tr><th style="min-width: 90px;">マーク</th><th>略語</th><th>日本語</th><th>ミス回数</th><th>対象号機</th></tr>
-        </thead>
-        <tbody></tbody>
-      `;
+      table.innerHTML = `<thead><tr><th style="min-width: 90px;">マーク</th><th>略語</th><th>日本語</th><th>ミス回数</th><th>対象号機</th></tr></thead><tbody></tbody>`;
       const tbody = table.querySelector('tbody');
       
       gCards.forEach(c => {
         const p = progMap.get(c.id);
         const uAct = p?.flags?.uneasy ? 'active' : '';
         const mAct = p?.flags?.mistake ? 'active' : '';
-        
         const tr = document.createElement('tr');
         tr.innerHTML = `
           <td style="white-space: nowrap;">
             <button class="flag-btn toggle-flag-btn ${uAct}" data-id="${c.id}" data-flag="uneasy" title="不安">😰</button>
             <button class="flag-btn toggle-flag-btn ${mAct}" data-id="${c.id}" data-flag="mistake" title="ミス注意">⚠️</button>
           </td>
-          <td><strong>${c.abbr}</strong></td>
-          <td>${c.ja}</td>
+          <td><strong>${c.abbr}</strong></td><td>${c.ja}</td>
           <td style="color:var(--danger-color); font-weight:bold;">${p.wrongCount}回</td>
           <td>${c.targetMachine || '-'}</td>
         `;
         tbody.appendChild(tr);
       });
       
-      content.appendChild(table);
-      wrapper.appendChild(header);
-      wrapper.appendChild(content);
-      container.appendChild(wrapper);
+      content.appendChild(table); wrapper.appendChild(header); wrapper.appendChild(content); container.appendChild(wrapper);
     });
   }
   showScreen('analytics');
 }
 
 // ==========================================
-// 🔍 設定画面＆プレビュー・出題セット生成
+// 🔍 設定画面＆出題セット生成
 // ==========================================
 async function getFilteredCards() {
   const allCards = await getAllFromStore('cards');
@@ -773,26 +730,21 @@ async function prepareConfigScreen() {
       eqContainer.innerHTML += `<label class="checkbox-label"><input type="checkbox" value="${eq}" class="chk-eq"> ${eq}</label>`;
     });
   }
-  
   await updateConfigPreview();
 }
 
 // ==========================================
-// セッション制御
+// セッション制御 (順序指定・もう一度機能対応)
 // ==========================================
 async function startSession() {
   const mode = document.getElementById('config-mode').value;
-  AppState.session.mode = mode;
-  
   let cards = await getFilteredCards();
   const extractType = document.querySelector('input[name="extract-type"]:checked').value;
 
   if (extractType === 'random') {
     cards.sort(() => Math.random() - 0.5);
     const countSelect = document.getElementById('config-count').value;
-    if (countSelect !== 'all') {
-      cards = cards.slice(0, parseInt(countSelect));
-    }
+    if (countSelect !== 'all') cards = cards.slice(0, parseInt(countSelect));
   } else {
     const chunkSize = parseInt(document.getElementById('config-chunk-size').value);
     const chunkIndex = parseInt(document.getElementById('config-chunk-select').value);
@@ -803,20 +755,40 @@ async function startSession() {
     } else {
       cards =[];
     }
+
+    // ★ 区間(セット)抽出時の「順序指定」処理
+    const order = document.getElementById('config-chunk-order').value;
+    if (order === 'reverse') cards.reverse();
+    if (order === 'random') cards.sort(() => Math.random() - 0.5);
   }
   
   if (cards.length === 0) return alert("条件・絞り込みに一致する問題がありません！");
 
-  AppState.session.cards = cards;
+  // ★「もう一度」機能のために今回の設定を保存
+  AppState.lastSession = { cards: [...cards], mode };
+
+  initAndRunSession(cards, mode);
+}
+
+// 「もう一度」ボタンの処理
+function retrySession() {
+  if (!AppState.lastSession) return;
+  initAndRunSession([...AppState.lastSession.cards], AppState.lastSession.mode);
+}
+
+function initAndRunSession(cardsArray, mode) {
+  AppState.session.mode = mode;
+  AppState.session.cards = cardsArray;
   AppState.session.currentIndex = 0;
-  AppState.session.results = cards.map(c => ({
+  AppState.session.results = cardsArray.map(c => ({
     cardId: c.id, judged: false, isCorrect: false, userInput: '', attemptId: null,
     testType: mode === 'test' ? (Math.random() > 0.5 ? 'rev1' : 'rev2') : mode
   }));
 
   if (mode === 'test') {
-    AppState.session.timeRemaining = cards.length * 10;
+    AppState.session.timeRemaining = cardsArray.length * 10;
     document.getElementById('session-timer').style.display = 'inline';
+    if (AppState.session.timerInterval) clearInterval(AppState.session.timerInterval);
     AppState.session.timerInterval = setInterval(() => {
       AppState.session.timeRemaining--;
       const tr = AppState.session.timeRemaining;
@@ -831,6 +803,11 @@ async function startSession() {
   renderCard();
 }
 
+function updateSessionCorrectIndicator() {
+  const correctCount = AppState.session.results.filter(r => r.isCorrect).length;
+  document.getElementById('session-correct-indicator').textContent = `✔ ${correctCount}`;
+}
+
 function renderCard() {
   const s = AppState.session;
   const card = s.cards[s.currentIndex];
@@ -838,6 +815,8 @@ function renderCard() {
   const activeMode = s.mode === 'test' ? state.testType : s.mode;
 
   document.getElementById('session-progress').textContent = `${s.currentIndex + 1} / ${s.cards.length}`;
+  updateSessionCorrectIndicator(); // リアルタイム正答数の表示
+
   document.getElementById('badge-equipment').textContent = card.equipmentCategory?.join(', ') || '分類なし';
   
   const sysBadge = document.getElementById('badge-system');
@@ -893,6 +872,9 @@ function renderCard() {
   }
 }
 
+// ==========================================
+// 解答・判定ロジック
+// ==========================================
 async function handleAnswer() {
   const s = AppState.session;
   const card = s.cards[s.currentIndex];
@@ -1008,9 +990,10 @@ function overwriteToCorrect(cardId, attemptId) {
 function endSession() {
   const s = AppState.session;
   if (s.timerInterval) clearInterval(s.timerInterval);
-  const judgedCards = s.results.filter(r => r.judged);
-  const correctCount = judgedCards.filter(r => r.isCorrect).length;
-  const total = judgedCards.length;
+  
+  // ★ 正答率の計算方法の改修（「✔を押した数 / セッションの全問題数」で計算）
+  const total = s.cards.length;
+  const correctCount = s.results.filter(r => r.isCorrect).length;
   const accuracy = total > 0 ? Math.round((correctCount / total) * 100) : 0;
 
   document.getElementById('res-correct').textContent = correctCount;
