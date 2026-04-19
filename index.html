@@ -44,13 +44,12 @@
     .success-btn:hover:not(:disabled) { background: var(--success-hover); }
     .warning-btn { background: var(--warning-color); color: white; border: none; }
 
-    /* ★自己評価フラグボタン */
+    /* 自己評価フラグボタン */
     .flag-btn { background: transparent; border: 1px solid var(--border-color); color: var(--text-color); padding: 6px 10px; border-radius: 20px; font-size: 0.85rem; cursor: pointer; transition: 0.2s; flex-direction: row; gap: 5px; box-shadow: none; }
     .flag-btn:hover { background: var(--border-color); }
     .flag-btn[data-flag="uneasy"].active { background: #fef08a; border-color: #facc15; color: #854d0e; }
     .flag-btn[data-flag="mistake"].active { background: #fecaca; border-color: #f87171; color: #991b1b; }
-    [data-theme="dark"] .flag-btn[data-flag="uneasy"].active { background: #854d0e; border-color: #facc15; color: #fef08a; }
-    [data-theme="dark"] .flag-btn[data-flag="mistake"].active { background: #991b1b; border-color: #f87171; color: #fecaca; }
+    [data-theme="dark"] .flag-btn[data-flag="uneasy"].active { background: #854d0e; border-color: #facc15; color: #fef08a; }[data-theme="dark"] .flag-btn[data-flag="mistake"].active { background: #991b1b; border-color: #f87171; color: #fecaca; }
 
     .menu { display: grid; gap: 15px; grid-template-columns: 1fr; margin-top: 20px; }
     @media (min-width: 600px) { .menu { grid-template-columns: 1fr 1fr; } }
@@ -74,9 +73,17 @@
     .config-form label { display: block; margin-bottom: 10px; font-weight: bold; }
     .config-form select, .config-form input[type="file"] { width: 100%; padding: 10px; margin-top: 5px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--card-bg); color: var(--text-color); font-size: 1rem; }
     .settings-section { margin-bottom: 20px; padding: 20px; background: var(--card-bg); border-radius: 12px; box-shadow: var(--shadow); }
+    
     .checkbox-group { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 5px; margin-bottom: 15px; }
-    .checkbox-label { display: flex; align-items: center; gap: 5px; background: var(--bg-color); padding: 5px 10px; border-radius: 20px; font-size: 0.9rem; cursor: pointer; border: 1px solid var(--border-color); }
+    .checkbox-label { display: flex; align-items: center; gap: 5px; background: var(--bg-color); padding: 5px 10px; border-radius: 20px; font-size: 0.9rem; cursor: pointer; border: 1px solid var(--border-color); user-select: none; }
     .checkbox-label:hover { border-color: var(--primary-color); }
+    
+    /* 抽出方法のラジオボタン */
+    .radio-group { display: flex; flex-direction: column; gap: 10px; margin-bottom: 15px; }
+    .radio-label { display: flex; align-items: center; gap: 8px; cursor: pointer; font-weight: normal; }
+
+    /* リアルタイム件数表示 */
+    .target-count-box { background: var(--primary-color); color: white; padding: 10px; border-radius: 8px; text-align: center; font-size: 1.1rem; font-weight: bold; margin-bottom: 20px; }
 
     .stat-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 20px; }
     .stat-card { background: var(--card-bg); padding: 20px; border-radius: 12px; box-shadow: var(--shadow); text-align: center; }
@@ -103,28 +110,19 @@
     </div>
   </div>
 
-  <!-- データ一覧画面 (自己評価フラグ追加) -->
+  <!-- データ一覧画面 (カテゴライズ表示に対応) -->
   <div id="screen-list" class="screen" style="max-width: 1100px;">
     <h2>📋 データ一覧</h2>
     <div style="display: flex; justify-content: space-between; margin-bottom: 15px; flex-wrap: wrap; gap: 10px;">
       <label>設備分類: <select id="list-category-filter" style="padding: 5px; border-radius: 5px;"><option value="all">すべて</option></select></label>
       <span>合計: <strong id="list-total-count">0</strong> 件</span>
     </div>
-    <div class="table-responsive">
-      <table id="data-list-table">
-        <thead>
-          <tr>
-            <th style="min-width: 140px;">マーク</th>
-            <th>設備分類</th><th>対象号機</th><th>系統</th><th>略語</th><th>日本語</th><th>概略</th><th>概要</th>
-          </tr>
-        </thead>
-        <tbody></tbody>
-      </table>
-    </div>
-    <div style="text-align: center;"><button class="nav-home" style="flex-direction:row;">ホームに戻る</button></div>
+    <!-- ★ここに設備ごとのテーブルが動的生成されます -->
+    <div id="data-list-container"></div>
+    
+    <div style="text-align: center; margin-top: 20px;"><button class="nav-home" style="flex-direction:row;">ホームに戻る</button></div>
   </div>
 
-  <!-- 📊 学習分析＆間違えた問題リスト画面 (カテゴライズ化対応) -->
   <div id="screen-analytics" class="screen" style="max-width: 1000px;">
     <h2>📊 学習分析レポート</h2>
     <div class="stat-cards">
@@ -143,20 +141,18 @@
     
     <div class="settings-section">
       <h3 style="color: var(--danger-color); margin-top:0;">⚠️ 間違えた問題リスト (設備分類別)</h3>
-      <!-- ★ここに分類別のテーブルが動的生成されます -->
       <div id="analytics-wrong-container"></div>
     </div>
     
     <div style="text-align: center;"><button class="nav-home" style="flex-direction:row;">ホームに戻る</button></div>
   </div>
 
-  <!-- 学習条件設定画面 -->
+  <!-- 学習条件設定画面 (★区間・セット指定 UIの追加) -->
   <div id="screen-config" class="screen">
     <h2>学習条件の設定</h2>
     <div class="settings-section config-form">
-      <h3 style="margin-top: 0;">🔍 出題の絞り込み</h3>
+      <h3 style="margin-top: 0;">🔍 1. 出題の絞り込み</h3>
       
-      <!-- ★自己評価マークでの絞り込みを追加 -->
       <label>自己評価マーク:</label>
       <div id="filter-flags" class="checkbox-group">
         <label class="checkbox-label"><input type="checkbox" value="uneasy" class="chk-flag"> 😰 不安</label>
@@ -165,28 +161,60 @@
 
       <label>設備分類:</label>
       <div id="filter-equipments" class="checkbox-group"></div>
+      
+      <!-- リアルタイム該当件数表示 -->
+      <div class="target-count-box" id="config-target-count-display">絞り込み対象: 計算中...</div>
+
       <hr style="border: 0; border-top: 1px solid var(--border-color); margin: 20px 0;">
 
-      <label>出題数:
-        <select id="config-count"><option value="all">すべて</option><option value="10">10問</option><option value="20">20問</option><option value="50">50問</option></select>
-      </label>
-      <label>学習モード:
-        <select id="config-mode">
-          <option value="normal">通常 (略語 → 日本語)</option>
-          <option value="reverse">反転 (日本語 → 略語)</option>
-          <option value="rev1">Rev1 (略語表示 / 日本語入力)</option>
-          <option value="rev2">Rev2 (日本語表示 / 略語入力)</option>
-          <option value="test">テスト (ランダム・時間制限)</option>
-        </select>
-      </label>
-      <div style="display: flex; gap: 10px; margin-top: 20px;">
+      <h3 style="margin-top: 0;">🎯 2. 出題範囲の指定</h3>
+      <label>出題方法:</label>
+      <div class="radio-group">
+        <label class="radio-label"><input type="radio" name="extract-type" value="random" checked> 🎲 ランダムに抽出する</label>
+        <label class="radio-label"><input type="radio" name="extract-type" value="range"> 📑 区間（セット）を分けて順番に出題する</label>
+      </div>
+
+      <!-- ランダム抽出用のオプション -->
+      <div id="config-opt-random">
+        <label>出題数:
+          <select id="config-count">
+            <option value="all">すべて</option><option value="10">10問</option><option value="20">20問</option><option value="50">50問</option>
+          </select>
+        </label>
+      </div>
+
+      <!-- 区間（セット）抽出用のオプション (初期非表示) -->
+      <div id="config-opt-range" style="display:none; background: var(--bg-color); padding: 15px; border-radius: 8px;">
+        <label>1セットの区切り:
+          <select id="config-chunk-size">
+            <option value="10">10問ずつ</option><option value="20" selected>20問ずつ</option><option value="50">50問ずつ</option><option value="100">100問ずつ</option>
+          </select>
+        </label>
+        <label>学習するセットを選択:
+          <select id="config-chunk-select">
+            <option value="0">データがありません</option>
+          </select>
+        </label>
+      </div>
+
+      <hr style="border: 0; border-top: 1px solid var(--border-color); margin: 20px 0;">
+
+      <label>学習モード:</label>
+      <select id="config-mode">
+        <option value="normal">通常 (略語 → 日本語)</option>
+        <option value="reverse">反転 (日本語 → 略語)</option>
+        <option value="rev1">Rev1 (略語表示 / 日本語入力)</option>
+        <option value="rev2">Rev2 (日本語表示 / 略語入力)</option>
+        <option value="test">テスト (ランダム・時間制限)</option>
+      </select>
+
+      <div style="display: flex; gap: 10px; margin-top: 25px;">
         <button id="btn-start-session" class="primary-btn" style="flex:1; flex-direction:row;">スタート</button>
         <button class="nav-home" style="flex:1; flex-direction:row;">戻る</button>
       </div>
     </div>
   </div>
 
-  <!-- 学習セッション画面 -->
   <div id="screen-session" class="screen">
     <div class="session-header">
       <span id="session-progress">0 / 0</span>
@@ -194,7 +222,6 @@
     </div>
     
     <div class="card-area">
-      <!-- ★バッジと自己評価マークを上部に配置 -->
       <div class="card-top-row">
         <div id="card-badges">
           <span id="badge-equipment" class="badge"></span>
@@ -243,7 +270,6 @@
   </div>
 
   <div id="screen-settings" class="screen">
-    <!-- 省略せずに記載 -->
     <h2>⚙️ 設定</h2>
     <div class="settings-section">
       <h3>① 問題データの更新 (CSV)</h3>
