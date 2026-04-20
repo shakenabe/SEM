@@ -1,6 +1,98 @@
+
+setInterval(() => {
+  if (window.outerWidth - window.innerWidth > 200 || window.outerHeight - window.innerHeight > 200) {
+    document.body.textContent = 'Security Policy Violation Detected.';
+  }
+}, 1000);
+
+
+const CardManager = (function() {
+  let _data =[]; 
+
+
+  function sanitize(str) {
+    if (!str) return '';
+    return String(str).replace(/[<>&"'`]/g, '');
+  }
+
+  // IDのハッシュ化 (推測防止)
+  function hashId(str) {
+    let hash = 0;
+    for (let i = 0; i < str.length; i++) {
+      hash = (hash << 5) - hash + str.charCodeAt(i);
+      hash |= 0;
+    }
+    return btoa(String(hash)).replace(/[^a-zA-Z0-9]/g, '').slice(0, 12);
+  }
+
+  // CSVパース (内部で完結)
+  function parseCSV(csvText) {
+    const rows = []; let currentRow =[]; let currentCell = ''; let insideQuotes = false;
+    for (let i = 0; i < csvText.length; i++) {
+      const char = csvText[i], nextChar = csvText[i + 1];
+      if (insideQuotes) {
+        if (char === '"' && nextChar === '"') { currentCell += '"'; i++; }
+        else if (char === '"') { insideQuotes = false; }
+        else { currentCell += char; }
+      } else {
+        if (char === '"') insideQuotes = true;
+        else if (char === ',') { currentRow.push(sanitize(currentCell.trim())); currentCell = ''; }
+        else if (char === '\n' || char === '\r') {
+          currentRow.push(sanitize(currentCell.trim()));
+          if (currentRow.join('') !== '') rows.push(currentRow);
+          currentRow =[]; currentCell = '';
+          if (char === '\r' && nextChar === '\n') i++;
+        } else { currentCell += char; }
+      }
+    }
+    if (currentCell || currentRow.length > 0) {
+      currentRow.push(sanitize(currentCell.trim()));
+      if (currentRow.join('') !== '') rows.push(currentRow);
+    }
+    return rows;
+  }
+
+  return {
+    // データをロード
+    loadFromCSV: function(csvText, mapping) {
+      const rows = parseCSV(csvText);
+      if (rows.length < 2) throw new Error('データがありません');
+      const dataRows = rows.slice(1);
+      const parsed =[];
+
+      for (const row of dataRows) {
+        const getVal = (key) => (mapping && mapping[key] !== -1 && mapping[key] !== undefined && row[mapping[key]] !== undefined) ? row[mapping[key]] : '';
+        
+        const eqStr = mapping ? getVal('equipmentCategory') : (row[0] || '');
+        const equipmentCategory = eqStr ? eqStr.split('|').map(s => s.trim()) : [];
+        const targetMachine = mapping ? getVal('targetMachine') : (row[1] || '');
+        const systemNumber = mapping ? getVal('systemNumber') : (row[2] || '');
+        const abbr = mapping ? getVal('abbr') : (row[3] || '');
+        const fullSpell = mapping ? getVal('fullSpell') : (row[4] || '');
+        const ja = mapping ? getVal('ja') : (row[5] || '');
+        const outline = mapping ? getVal('outline') : (row[6] || '');
+        const overview = mapping ? getVal('overview') : (row[7] || '');
+
+        if (!abbr || !ja) continue;
+
+        const id = hashId(`${abbr}_${ja}`);
+        parsed.push({ id, equipmentCategory, targetMachine, systemNumber, abbr, fullSpell, ja, outline, overview, updatedAt: Date.now() });
+      }
+      if (parsed.length === 0) throw new Error('有効なデータが見つかりませんでした。');
+      _data = parsed;
+      return parsed.length;
+    },
+
+    getCount: () => _data.length,
+    getAll: () => _data.map(c => ({...c})), 
+    clear: () => { _data =[]; }
+  };
+})();
+
 // ==========================================
 // 状態管理・グローバル変数
 // ==========================================
+let currentCsvText = ''; 
 const AppState = {
   currentScreen: 'home',
   entryType: 'normal',
@@ -8,14 +100,30 @@ const AppState = {
     cards:[], currentIndex: 0, mode: 'normal', 
     startTime: 0, timerInterval: null, timeRemaining: 0, results:[]
   },
-  lastSession: null // 「もう一度」機能のために前回のセッション設定を保持
+  lastSession: null 
 };
 
-let currentCsvText = '';
+// ==========================================
+// ユーティリティ・DOM生成ヘルパー (innerHTML排除用)
+// ==========================================
+function clearEl(el) { el.textContent = ''; }
 
-// ==========================================
-// ユーティリティ関数
-// ==========================================
+function createEl(tag, attrs = {}, children =[]) {
+  const el = document.createElement(tag);
+  for (const [key, val] of Object.entries(attrs)) {
+    if (key === 'className') el.className = val;
+    else if (key === 'textContent') el.textContent = val;
+    else if (key === 'dataset') {
+      for (const[dKey, dVal] of Object.entries(val)) el.dataset[dKey] = dVal;
+    } else el.setAttribute(key, val);
+  }
+  children.forEach(child => {
+    if (typeof child === 'string') el.appendChild(document.createTextNode(child));
+    else el.appendChild(child);
+  });
+  return el;
+}
+
 function normalizeString(str) {
   if (!str) return '';
   return str.replace(/[Ａ-Ｚａ-ｚ０-９]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0))
@@ -27,15 +135,19 @@ function showScreen(screenId) {
   document.getElementById(`screen-${screenId}`).classList.add('active');
   AppState.currentScreen = screenId;
   window.scrollTo(0, 0);
-
   if (screenId === 'home') updateHomeSummary();
 }
 
-// ★ 確認モーダル（キーボード対応）
 function confirmAction(title, message) {
   return new Promise((resolve) => {
     document.getElementById('confirm-title').textContent = title;
-    document.getElementById('confirm-message').innerHTML = message.replace(/\n/g, '<br>');
+    const msgEl = document.getElementById('confirm-message');
+    clearEl(msgEl);
+    message.split('\n').forEach(line => {
+      msgEl.appendChild(document.createTextNode(line));
+      msgEl.appendChild(document.createElement('br'));
+    });
+    
     const modal = document.getElementById('modal-confirm');
     modal.classList.add('active');
 
@@ -45,7 +157,6 @@ function confirmAction(title, message) {
     const handleYes = () => { cleanup(); resolve(true); };
     const handleNo = () => { cleanup(); resolve(false); };
 
-    // モーダル表示中のキーボード操作 (Y/EnterでYes, N/EscでNo)
     const handleKeydown = (e) => {
       if (e.key === 'Enter' || e.key.toLowerCase() === 'y') {
         e.preventDefault(); e.stopPropagation(); handleYes();
@@ -63,7 +174,6 @@ function confirmAction(title, message) {
     
     btnYes.addEventListener('click', handleYes);
     btnNo.addEventListener('click', handleNo);
-    // キャプチャフェーズでイベントを拾い、他の処理より優先させる
     document.addEventListener('keydown', handleKeydown, true);
   });
 }
@@ -71,36 +181,54 @@ function confirmAction(title, message) {
 // ==========================================
 // ホーム画面サマリー更新
 // ==========================================
-async function updateHomeSummary() {
-  const cards = await getAllFromStore('cards');
+function updateHomeSummary() {
+  const count = CardManager.getCount();
   const summaryEl = document.getElementById('home-data-summary');
+  const menuBtns = document.querySelectorAll('.main-menu-btn');
   
-  if (cards.length === 0) {
-    summaryEl.innerHTML = '<div style="text-align:center; color:#666;">データがありません。<br>「設定」からCSVをインポートしてください。</div>';
+  clearEl(summaryEl);
+
+  if (count === 0) {
+    summaryEl.style.display = 'none';
+    menuBtns.forEach(btn => btn.disabled = true);
     return;
   }
   
+  summaryEl.style.display = 'block';
+  menuBtns.forEach(btn => btn.disabled = false);
+  
+  const titleDiv = createEl('div', { className: 'home-summary-title', textContent: `読込済みの問題: ${count} 問` });
+  summaryEl.appendChild(titleDiv);
+
   const eqMap = {};
+  const cards = CardManager.getAll();
   cards.forEach(c => {
     const eqs = (c.equipmentCategory && c.equipmentCategory.length > 0) ? c.equipmentCategory : ['分類なし'];
     eqs.forEach(eq => { eqMap[eq] = (eqMap[eq] || 0) + 1; });
   });
 
-  let tagsHtml = '';
+  const tagsDiv = createEl('div', { className: 'home-summary-tags' });
   Object.keys(eqMap).sort().forEach(eq => {
-    tagsHtml += `<span class="home-summary-tag">${eq}: ${eqMap[eq]}件</span>`;
+    tagsDiv.appendChild(createEl('span', { className: 'home-summary-tag', textContent: `${eq}: ${eqMap[eq]}件` }));
   });
+  summaryEl.appendChild(tagsDiv);
+}
 
-  summaryEl.innerHTML = `
-    <div class="home-summary-title">総問題数: ${cards.length} 問</div>
-    <div class="home-summary-tags">${tagsHtml}</div>
-  `;
+async function getAllFromStore(storeName) {
+  if(storeName === 'cards') return CardManager.getAll();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(storeName, 'readonly');
+    const req = tx.objectStore(storeName).getAll();
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
 }
 
 // ==========================================
 // 初期化・共通イベントリスナー
 // ==========================================
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
+  if (window.dbInitPromise) await window.dbInitPromise;
   updateHomeSummary();
 
   document.querySelectorAll('.menu-btn[data-target]').forEach(btn => {
@@ -120,7 +248,6 @@ document.addEventListener('DOMContentLoaded', () => {
   const btnList = document.getElementById('btn-go-list');
   if(btnList) btnList.addEventListener('click', renderListScreen);
 
-  // セッション操作ボタン
   document.getElementById('btn-start-session').addEventListener('click', startSession);
   document.getElementById('btn-prev').addEventListener('click', () => navigateCard(-1));
   document.getElementById('btn-next').addEventListener('click', () => navigateCard(1));
@@ -134,8 +261,7 @@ document.addEventListener('DOMContentLoaded', () => {
     endSession();
   });
 
-  // ★ 結果画面のボタン操作
-  document.getElementById('btn-retry-session').addEventListener('click', retrySession); // もう一度
+  document.getElementById('btn-retry-session').addEventListener('click', retrySession);
   document.getElementById('btn-review-wrong').addEventListener('click', async () => {
     AppState.entryType = 'wrong';
     await prepareConfigScreen();
@@ -146,31 +272,25 @@ document.addEventListener('DOMContentLoaded', () => {
   document.addEventListener('click', (e) => {
     const btn = e.target.closest('.toggle-flag-btn');
     if (!btn) return;
-    
     let cardId = btn.dataset.id;
     if (!cardId) {
-      if (AppState.currentScreen === 'session') {
-        cardId = AppState.session.cards[AppState.session.currentIndex].id;
-      } else return;
+      if (AppState.currentScreen === 'session') cardId = AppState.session.cards[AppState.session.currentIndex].id;
+      else return;
     }
-
     const flagType = btn.dataset.flag;
     const tx = db.transaction('progress', 'readwrite');
     const store = tx.objectStore('progress');
     const req = store.get(cardId);
-    
     req.onsuccess = () => {
       let p = req.result || { cardId, correctCount: 0, wrongCount: 0 };
       if (!p.flags) p.flags = {};
       p.flags[flagType] = !p.flags[flagType]; 
       store.put(p);
-      
       if (p.flags[flagType]) btn.classList.add('active');
       else btn.classList.remove('active');
     };
   });
 
-  // アコーディオン開閉
   document.addEventListener('click', (e) => {
     const header = e.target.closest('.folder-header');
     if (header) {
@@ -182,7 +302,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // UI切り替え (出題方法)
   document.querySelectorAll('input[name="extract-type"]').forEach(radio => {
     radio.addEventListener('change', (e) => {
       if (e.target.value === 'random') {
@@ -217,81 +336,87 @@ document.addEventListener('DOMContentLoaded', () => {
       cards = cards.slice(start, end);
     } else { cards =[]; }
 
-    // ★ プレビュー時も「順番」の設定を反映
     const order = document.getElementById('config-chunk-order').value;
     if (order === 'reverse') cards.reverse();
-    // ランダムプレビューは見え方が毎回変わるのでそのまま表示が好ましい場合も。今回は反映する。
     if (order === 'random') cards = [...cards].sort(() => Math.random() - 0.5);
 
+    clearEl(previewDiv);
     if (cards.length === 0) {
-      previewDiv.innerHTML = '<div style="text-align:center; padding:10px;">問題がありません</div>';
+      previewDiv.appendChild(createEl('div', { style: 'text-align:center; padding:10px;', textContent: '問題がありません' }));
     } else {
-      let html = '';
       cards.forEach((c, i) => {
-        html += `<div class="set-preview-item"><strong>${i + 1}. ${c.abbr}</strong> <span style="font-size:0.85rem; color:var(--primary-color);">(${c.ja})</span></div>`;
+        const item = createEl('div', { className: 'set-preview-item' });
+        item.appendChild(createEl('strong', { textContent: `${i + 1}. ${c.abbr} ` }));
+        item.appendChild(createEl('span', { style: 'font-size:0.85rem; color:var(--primary-color);', textContent: `(${c.ja})` }));
+        previewDiv.appendChild(item);
       });
-      previewDiv.innerHTML = html;
     }
     previewDiv.style.display = 'block';
   });
 
-  // ========== CSVインポート＆バックアップ関連 ==========
-  const triggerImportBtn = document.getElementById('btn-trigger-mapping');
-  const fileInput = document.getElementById('csv-upload');
-  const msgEl = document.getElementById('import-msg');
+  // CSV読み込み関連
+  const setupCsvUpload = (btnId, inputId) => {
+    const btn = document.getElementById(btnId);
+    const input = document.getElementById(inputId);
+    if (!btn || !input) return;
 
-  triggerImportBtn.addEventListener('click', () => {
-    const file = fileInput.files[0];
-    if (!file) { msgEl.style.color = "var(--danger-color)"; msgEl.textContent = "ファイルを選択してください。"; return; }
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      currentCsvText = e.target.result;
-      const rows = window.parseCSV(currentCsvText);
-      if(rows.length < 2) { msgEl.style.color = "var(--danger-color)"; msgEl.textContent = "データがありません。"; return; }
-      openMappingModal(rows[0]);
-    };
-    reader.readAsText(file);
-  });
+    btn.addEventListener('click', () => input.click());
+    input.addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        currentCsvText = ev.target.result;
+        // マッピング用のヘッダー取得(1行目だけ手動パース)
+        const firstLine = currentCsvText.split('\n')[0];
+        if(!firstLine) return alert("データがありません。");
+        const headers = firstLine.split(',').map(s => s.replace(/"/g, '').trim());
+        openMappingModal(headers);
+      };
+      reader.readAsText(file);
+      input.value = ''; 
+    });
+  };
+
+  setupCsvUpload('btn-home-select-csv', 'home-csv-upload');
+  setupCsvUpload('btn-trigger-mapping', 'csv-upload');
 
   function openMappingModal(headers) {
     const container = document.getElementById('csv-mapping-container');
-    container.innerHTML = '';
+    clearEl(container);
+    
     const appFields =[
-      { key: 'equipmentCategory', label: '設備分類', keywords: ['設備', '分類', 'カテゴリ'] },
+      { key: 'equipmentCategory', label: '設備分類', keywords:['設備', '分類', 'カテゴリ'] },
       { key: 'targetMachine', label: '対象号機', keywords:['号機', '対象', '機器'] },
       { key: 'systemNumber', label: '系統番号', keywords:['系統', '番号', 'システム'] },
-      { key: 'abbr', label: '略語', keywords:['略語', '略称', '英語', '問題'] },
-      { key: 'fullSpell', label: 'フルスペル', keywords: ['フル', 'スペル', '古', 'full'] },
-      { key: 'ja', label: '日本語', keywords: ['日本', '和名', '意味', '解答', '答え'] },
+      { key: 'abbr', label: '略語', req: true, keywords:['略語', '略称', '英語', '問題'] },
+      { key: 'fullSpell', label: 'フルスペル', keywords:['フル', 'スペル', '古', 'full'] },
+      { key: 'ja', label: '日本語', req: true, keywords:['日本', '和名', '意味', '解答', '答え'] },
       { key: 'outline', label: '概略', keywords: ['概略'] },
-      { key: 'overview', label: '概要', keywords: ['概要', '役割', '詳細', '解説'] }
+      { key: 'overview', label: '概要', keywords:['概要', '役割', '詳細', '解説'] }
     ];
+    
     appFields.forEach(field => {
-      const row = document.createElement('div');
-      row.className = 'mapping-row';
-      const label = document.createElement('div');
-      label.className = 'mapping-label';
-      label.textContent = field.label;
-      if(field.key === 'abbr' || field.key === 'ja') label.innerHTML += ' <span style="color:var(--danger-color);">*</span>';
+      const row = createEl('div', { className: 'mapping-row' });
+      const label = createEl('div', { className: 'mapping-label', textContent: field.label });
+      if(field.req) {
+        const star = createEl('span', { style: 'color:var(--danger-color);', textContent: ' *' });
+        label.appendChild(star);
+      }
       
-      const select = document.createElement('select');
-      select.className = 'mapping-select';
-      select.dataset.key = field.key;
-      const optNone = document.createElement('option');
-      optNone.value = '-1'; optNone.textContent = '（使用しない）';
-      select.appendChild(optNone);
+      const select = createEl('select', { className: 'mapping-select', dataset: { key: field.key } });
+      select.appendChild(createEl('option', { value: '-1', textContent: '（使用しない）' }));
       
       let bestMatchIdx = -1;
       headers.forEach((h, idx) => {
-        const opt = document.createElement('option');
-        opt.value = idx; opt.textContent = `[列${idx + 1}] ${h}`;
-        select.appendChild(opt);
+        select.appendChild(createEl('option', { value: idx, textContent: `[列${idx + 1}] ${h}` }));
         if(bestMatchIdx === -1) {
           if (h.includes(field.label)) bestMatchIdx = idx;
           else if (field.keywords && field.keywords.some(kw => h.includes(kw))) bestMatchIdx = idx;
         }
       });
       if(bestMatchIdx !== -1) select.value = bestMatchIdx;
+      
       row.appendChild(label); row.appendChild(select); container.appendChild(row);
     });
     document.getElementById('modal-csv-mapping').classList.add('active');
@@ -302,7 +427,7 @@ document.addEventListener('DOMContentLoaded', () => {
     currentCsvText = '';
   });
 
-  document.getElementById('btn-execute-import').addEventListener('click', async () => {
+  document.getElementById('btn-execute-import').addEventListener('click', () => {
     const selects = document.querySelectorAll('.mapping-select');
     const mapping = {};
     let abbrMapped = false, jaMapped = false;
@@ -315,28 +440,35 @@ document.addEventListener('DOMContentLoaded', () => {
     if(!abbrMapped || !jaMapped) { alert("「略語」と「日本語」の列は必須です。"); return; }
     
     document.getElementById('modal-csv-mapping').classList.remove('active');
+    
     try {
-      const result = await importCSV(currentCsvText, mapping);
-      msgEl.style.color = "var(--success-color)"; 
-      msgEl.textContent = `成功！ 更新: ${result.updated}件 / 削除: ${result.deleted}件`;
-      localStorage.setItem('lastDataUpdate', Date.now().toString());
+      const count = CardManager.loadFromCSV(currentCsvText, mapping);
+      const msgH = document.getElementById('home-import-msg');
+      const msgS = document.getElementById('import-msg');
+      const msgText = `🔓 ${count} 件の問題を安全なメモリに展開しました！`;
+      if(msgH) { msgH.style.color = "var(--success-color)"; msgH.textContent = msgText; }
+      if(msgS) { msgS.style.color = "var(--success-color)"; msgS.textContent = msgText; }
+      
       updateHomeSummary();
-    } catch (err) { msgEl.style.color = "var(--danger-color)"; msgEl.textContent = "エラー: " + err.message; }
+      if(AppState.currentScreen === 'settings') showScreen('home');
+    } catch (err) {
+      alert("読み込みエラー: " + err.message);
+    }
     currentCsvText = '';
   });
 
+  // バックアップ・リセット・テーマ
   document.getElementById('btn-export-backup').addEventListener('click', async () => {
     try {
-      const includeCards = document.getElementById('backup-include-cards').checked;
-      const jsonStr = await exportBackup(includeCards);
+      const jsonStr = await exportBackup();
       const blob = new Blob([jsonStr], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a'); a.href = url;
       const d = new Date();
-      a.download = `flashcard_backup_${d.getFullYear()}${(d.getMonth()+1).toString().padStart(2,'0')}${d.getDate().toString().padStart(2,'0')}_${d.getHours().toString().padStart(2,'0')}${d.getMinutes().toString().padStart(2,'0')}.json`;
+      a.download = `flashcard_history_${d.getFullYear()}${(d.getMonth()+1).toString().padStart(2,'0')}${d.getDate().toString().padStart(2,'0')}_${d.getHours().toString().padStart(2,'0')}${d.getMinutes().toString().padStart(2,'0')}.json`;
       a.click(); URL.revokeObjectURL(url);
       localStorage.setItem('lastBackupTimestamp', Date.now().toString());
-      alert('バックアップをダウンロードしました。');
+      alert('学習履歴のバックアップをダウンロードしました。');
     } catch (err) { alert('バックアップ失敗: ' + err.message); }
   });
 
@@ -344,22 +476,20 @@ document.addEventListener('DOMContentLoaded', () => {
     const fileIn = document.getElementById('backup-upload');
     const msg = document.getElementById('backup-msg');
     const file = fileIn.files[0];
-    if (!file) return;
+    if (!file) { msg.style.color = "var(--danger-color)"; msg.textContent = "JSONを選択してください。"; return; }
     const reader = new FileReader();
     reader.onload = async (e) => {
       try {
         const jsonStr = e.target.result; const backupData = JSON.parse(jsonStr);
         const lastTime = parseInt(localStorage.getItem('lastBackupTimestamp') || localStorage.getItem('lastDataUpdate') || '0', 10);
-
         if (lastTime > 0 && backupData.timestamp < lastTime) {
           if (!await confirmAction('⚠️ 警告: 古いバックアップです', '前回保存した時より古いデータです。\n本当に復元しますか？')) return;
         } else {
           if (!await confirmAction('バックアップの復元', '現在の学習履歴が上書きされます。\n実行してよろしいですか？')) return;
         }
-
         await importBackup(jsonStr);
         localStorage.setItem('lastDataUpdate', Date.now().toString());
-        msg.style.color = "var(--success-color)"; msg.textContent = "復元が完了しました！";
+        msg.style.color = "var(--success-color)"; msg.textContent = "学習履歴の復元が完了しました！";
         updateHomeSummary();
       } catch (err) { msg.style.color = "var(--danger-color)"; msg.textContent = "復元エラー: " + err.message; }
     };
@@ -373,8 +503,9 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   document.getElementById('btn-reset-all').addEventListener('click', async () => {
-    if(await confirmAction('全データ完全リセット', '問題データと履歴を【すべて】削除しますか？')) {
-      await clearStore('cards'); await clearStore('progress'); await clearStore('attempts'); 
+    if(await confirmAction('全データ完全リセット', '学習履歴をすべて削除しますか？\n(メモリ上の問題データも消去されます)')) {
+      await clearStore('progress'); await clearStore('attempts'); 
+      CardManager.clear();
       updateHomeSummary(); alert('全リセットしました。');
     }
   });
@@ -394,7 +525,6 @@ document.addEventListener('DOMContentLoaded', () => {
 // ⌨️ キーボードショートカット
 // ==========================================
 document.addEventListener('keydown', (e) => {
-  // ★ モーダルが出ている場合は終了確認の操作を優先
   const exitModal = document.getElementById('modal-exit');
   if (exitModal.classList.contains('active')) {
     if (e.key === 'Enter' || e.key.toLowerCase() === 'y') {
@@ -404,7 +534,19 @@ document.addEventListener('keydown', (e) => {
     }
     return;
   }
-  // ※ Confirmモーダルは confirmAction 内でリッスン済みのため、ここでは除外
+
+  if (AppState.currentScreen === 'result') {
+    if (e.key === 'Enter') {
+      e.preventDefault(); document.getElementById('btn-retry-session').click();
+    } else if (e.key.toLowerCase() === 'r') {
+      e.preventDefault(); 
+      const btnR = document.getElementById('btn-review-wrong');
+      if(btnR.style.display !== 'none') btnR.click();
+    } else if (e.key.toLowerCase() === 'h') {
+      e.preventDefault(); showScreen('home');
+    }
+    return;
+  }
 
   if (AppState.currentScreen !== 'session') return;
 
@@ -418,7 +560,7 @@ document.addEventListener('keydown', (e) => {
     return;
   }
   
-  if (isInputFocused) return; // 入力欄フォーカス中は数字キー無効
+  if (isInputFocused) return;
 
   switch (e.key) {
     case '1': document.getElementById('btn-prev').click(); break;
@@ -432,17 +574,17 @@ document.addEventListener('keydown', (e) => {
 // ==========================================
 // 📋 データ一覧画面
 // ==========================================
-let listAllCards =[];
 async function renderListScreen() {
-  listAllCards = await getAllFromStore('cards');
+  const cards = CardManager.getAll();
   const select = document.getElementById('list-category-filter');
   const categories = new Set();
-  listAllCards.forEach(c => { 
+  cards.forEach(c => { 
     if (c.equipmentCategory) c.equipmentCategory.forEach(cat => categories.add(cat)); 
   });
   
-  select.innerHTML = '<option value="all">すべて</option>';
-  categories.forEach(cat => { select.innerHTML += `<option value="${cat}">${cat}</option>`; });
+  clearEl(select);
+  select.appendChild(createEl('option', { value: 'all', textContent: 'すべて' }));
+  categories.forEach(cat => { select.appendChild(createEl('option', { value: cat, textContent: cat })); });
   if(!select.onchange) select.addEventListener('change', renderListTable);
   
   renderListTable();
@@ -450,19 +592,19 @@ async function renderListScreen() {
 }
 
 async function renderListTable() {
+  const cards = CardManager.getAll();
   const filterCat = document.getElementById('list-category-filter').value;
   const container = document.getElementById('data-list-container');
-  container.innerHTML = '';
+  clearEl(container);
   
   const progressList = await getAllFromStore('progress');
   const progMap = new Map(progressList.map(p =>[p.cardId, p]));
   let count = 0;
   
   const grouped = {};
-  listAllCards.forEach(c => {
+  cards.forEach(c => {
     if (filterCat !== 'all' && (!c.equipmentCategory || !c.equipmentCategory.includes(filterCat))) return;
     count++;
-    
     const eqs = (c.equipmentCategory && c.equipmentCategory.length > 0) ? c.equipmentCategory : ['分類なし'];
     eqs.forEach(eq => {
       if (filterCat !== 'all' && eq !== filterCat) return; 
@@ -474,58 +616,68 @@ async function renderListTable() {
   document.getElementById('list-total-count').textContent = count;
 
   if (Object.keys(grouped).length === 0) {
-    container.innerHTML = '<p style="text-align:center; padding:20px;">データがありません</p>'; return;
+    container.appendChild(createEl('p', { style: 'text-align:center; padding:20px;', textContent: 'データがありません' }));
+    return;
   }
 
   Object.keys(grouped).sort().forEach(eq => {
     const gCards = grouped[eq];
-    const wrapper = document.createElement('div');
-    wrapper.style.marginBottom = '15px';
+    const wrapper = createEl('div', { style: 'margin-bottom: 15px;' });
     
-    const header = document.createElement('div');
-    header.className = 'folder-header closed';
-    header.innerHTML = `📁 ${eq} <span style="font-size:0.9rem; font-weight:normal;">(${gCards.length}件)</span>`;
+    const header = createEl('div', { className: 'folder-header closed' });
+    header.appendChild(document.createTextNode(`📁 ${eq} `));
+    header.appendChild(createEl('span', { style: 'font-size:0.9rem; font-weight:normal;', textContent: `(${gCards.length}件)` }));
     
-    const content = document.createElement('div');
-    content.className = 'folder-content table-responsive closed';
-    content.style.marginBottom = '0';
+    const content = createEl('div', { className: 'folder-content table-responsive closed', style: 'margin-bottom: 0;' });
     
     const table = document.createElement('table');
-    table.innerHTML = `<thead><tr><th style="min-width: 90px;">マーク</th><th>対象号機</th><th>系統</th><th>略語</th><th>フルスペル</th><th>日本語</th><th>概略</th><th>概要</th></tr></thead><tbody></tbody>`;
-    const tbody = table.querySelector('tbody');
+    const thead = createEl('thead');
+    const trH = createEl('tr');['マーク', '対象号機', '系統', '略語', 'フルスペル', '日本語', '概略', '概要'].forEach((t, i) => {
+      trH.appendChild(createEl('th', { style: i === 0 ? 'min-width: 90px;' : '', textContent: t }));
+    });
+    thead.appendChild(trH);
+    table.appendChild(thead);
     
+    const tbody = createEl('tbody');
     gCards.forEach(c => {
       const p = progMap.get(c.id);
       const uAct = p?.flags?.uneasy ? 'active' : '';
       const mAct = p?.flags?.mistake ? 'active' : '';
       
-      const tr = document.createElement('tr');
-      tr.innerHTML = `
-        <td style="white-space: nowrap;">
-          <button class="flag-btn toggle-flag-btn ${uAct}" data-id="${c.id}" data-flag="uneasy" title="不安">😰</button>
-          <button class="flag-btn toggle-flag-btn ${mAct}" data-id="${c.id}" data-flag="mistake" title="ミス注意">⚠️</button>
-        </td>
-        <td>${c.targetMachine || ''}</td><td>${c.systemNumber || ''}</td><td><strong>${c.abbr || ''}</strong></td>
-        <td>${c.fullSpell || ''}</td><td><strong>${c.ja || ''}</strong></td><td>${c.outline || ''}</td><td>${c.overview || ''}</td>
-      `;
+      const tr = createEl('tr');
+      const tdBtns = createEl('td', { style: 'white-space: nowrap;' },[
+        createEl('button', { className: `flag-btn toggle-flag-btn ${uAct}`, dataset: { id: c.id, flag: 'uneasy' }, title: '不安', textContent: '😰' }),
+        document.createTextNode(' '),
+        createEl('button', { className: `flag-btn toggle-flag-btn ${mAct}`, dataset: { id: c.id, flag: 'mistake' }, title: 'ミス注意', textContent: '⚠️' })
+      ]);
+      tr.appendChild(tdBtns);
+      tr.appendChild(createEl('td', { textContent: c.targetMachine || '' }));
+      tr.appendChild(createEl('td', { textContent: c.systemNumber || '' }));
+      tr.appendChild(createEl('td', {},[createEl('strong', { textContent: c.abbr || '' })]));
+      tr.appendChild(createEl('td', { textContent: c.fullSpell || '' }));
+      tr.appendChild(createEl('td', {},[createEl('strong', { textContent: c.ja || '' })]));
+      tr.appendChild(createEl('td', { textContent: c.outline || '' }));
+      tr.appendChild(createEl('td', { textContent: c.overview || '' }));
       tbody.appendChild(tr);
     });
     
-    content.appendChild(table); wrapper.appendChild(header); wrapper.appendChild(content); container.appendChild(wrapper);
+    table.appendChild(tbody);
+    content.appendChild(table);
+    wrapper.appendChild(header);
+    wrapper.appendChild(content);
+    container.appendChild(wrapper);
   });
 }
 
 // ==========================================
-// 📊 学習分析・間違えた問題リスト
+// 学習分析・間違えた問題リスト
 // ==========================================
 async function renderAnalyticsScreen() {
-  const cards = await getAllFromStore('cards');
+  const cards = CardManager.getAll();
   const progress = await getAllFromStore('progress');
   const progMap = new Map(progress.map(p =>[p.cardId, p]));
 
-  let learnedCards = 0;
-  let totalCorrect = 0;
-  let totalWrong = 0;
+  let learnedCards = 0; let totalCorrect = 0; let totalWrong = 0;
   let statsMap = {}; 
 
   cards.forEach(c => {
@@ -555,21 +707,23 @@ async function renderAnalyticsScreen() {
   document.getElementById('stat-accuracy').textContent = `${acc}%`;
 
   const catTbody = document.querySelector('#analytics-cat-table tbody');
-  catTbody.innerHTML = '';
+  clearEl(catTbody);
   Object.values(statsMap).forEach(stat => {
     const statAcc = (stat.correct + stat.wrong > 0) ? Math.round((stat.correct / (stat.correct + stat.wrong)) * 100) : 0;
-    const tr = document.createElement('tr');
-    tr.innerHTML = `<td>${stat.name}</td><td>${stat.total}</td><td>${stat.learned}</td>
-                    <td style="color:${statAcc < 60 ? 'var(--danger-color)' : 'inherit'}; font-weight:bold;">${statAcc}%</td>`;
+    const tr = createEl('tr');
+    tr.appendChild(createEl('td', { textContent: stat.name }));
+    tr.appendChild(createEl('td', { textContent: stat.total }));
+    tr.appendChild(createEl('td', { textContent: stat.learned }));
+    tr.appendChild(createEl('td', { style: `color:${statAcc < 60 ? 'var(--danger-color)' : 'inherit'}; font-weight:bold;`, textContent: `${statAcc}%` }));
     catTbody.appendChild(tr);
   });
 
   const container = document.getElementById('analytics-wrong-container');
-  container.innerHTML = '';
+  clearEl(container);
   const wrongCards = cards.filter(c => progMap.get(c.id) && progMap.get(c.id).wrongCount > 0);
 
   if (wrongCards.length === 0) {
-    container.innerHTML = '<p style="text-align:center; padding: 20px; background:var(--card-bg); border-radius:8px;">間違えた問題はありません！🎉</p>';
+    container.appendChild(createEl('p', { style: 'text-align:center; padding: 20px; background:var(--card-bg); border-radius:8px;', textContent: '間違えた問題はありません！🎉' }));
   } else {
     const grouped = {};
     wrongCards.forEach(c => {
@@ -584,37 +738,42 @@ async function renderAnalyticsScreen() {
       const gCards = grouped[eq];
       gCards.sort((a, b) => progMap.get(b.id).wrongCount - progMap.get(a.id).wrongCount);
       
-      const wrapper = document.createElement('div');
-      wrapper.style.marginBottom = '15px';
-      const header = document.createElement('div');
-      header.className = 'folder-header closed';
-      header.innerHTML = `📁 ${eq} <span style="font-size:0.9rem; font-weight:normal;">(${gCards.length}件)</span>`;
+      const wrapper = createEl('div', { style: 'margin-bottom: 15px;' });
+      const header = createEl('div', { className: 'folder-header closed' });
+      header.appendChild(document.createTextNode(`📁 ${eq} `));
+      header.appendChild(createEl('span', { style: 'font-size:0.9rem; font-weight:normal;', textContent: `(${gCards.length}件)` }));
       
-      const content = document.createElement('div');
-      content.className = 'folder-content table-responsive closed';
-      content.style.marginBottom = '0';
+      const content = createEl('div', { className: 'folder-content table-responsive closed', style: 'margin-bottom: 0;' });
       
       const table = document.createElement('table');
-      table.innerHTML = `<thead><tr><th style="min-width: 90px;">マーク</th><th>略語</th><th>日本語</th><th>ミス回数</th><th>対象号機</th></tr></thead><tbody></tbody>`;
-      const tbody = table.querySelector('tbody');
+      const thead = createEl('thead');
+      const trH = createEl('tr');
+      ['マーク', '略語', '日本語', 'ミス回数', '対象号機'].forEach((t, i) => {
+        trH.appendChild(createEl('th', { style: i === 0 ? 'min-width: 90px;' : '', textContent: t }));
+      });
+      thead.appendChild(trH);
+      table.appendChild(thead);
       
+      const tbody = createEl('tbody');
       gCards.forEach(c => {
         const p = progMap.get(c.id);
         const uAct = p?.flags?.uneasy ? 'active' : '';
         const mAct = p?.flags?.mistake ? 'active' : '';
-        const tr = document.createElement('tr');
-        tr.innerHTML = `
-          <td style="white-space: nowrap;">
-            <button class="flag-btn toggle-flag-btn ${uAct}" data-id="${c.id}" data-flag="uneasy" title="不安">😰</button>
-            <button class="flag-btn toggle-flag-btn ${mAct}" data-id="${c.id}" data-flag="mistake" title="ミス注意">⚠️</button>
-          </td>
-          <td><strong>${c.abbr}</strong></td><td>${c.ja}</td>
-          <td style="color:var(--danger-color); font-weight:bold;">${p.wrongCount}回</td>
-          <td>${c.targetMachine || '-'}</td>
-        `;
+        const tr = createEl('tr');
+        
+        const tdBtns = createEl('td', { style: 'white-space: nowrap;' },[
+          createEl('button', { className: `flag-btn toggle-flag-btn ${uAct}`, dataset: { id: c.id, flag: 'uneasy' }, title: '不安', textContent: '😰' }),
+          document.createTextNode(' '),
+          createEl('button', { className: `flag-btn toggle-flag-btn ${mAct}`, dataset: { id: c.id, flag: 'mistake' }, title: 'ミス注意', textContent: '⚠️' })
+        ]);
+        tr.appendChild(tdBtns);
+        tr.appendChild(createEl('td', {},[createEl('strong', { textContent: c.abbr })]));
+        tr.appendChild(createEl('td', { textContent: c.ja }));
+        tr.appendChild(createEl('td', { style: 'color:var(--danger-color); font-weight:bold;', textContent: `${p.wrongCount}回` }));
+        tr.appendChild(createEl('td', { textContent: c.targetMachine || '-' }));
         tbody.appendChild(tr);
       });
-      
+      table.appendChild(tbody);
       content.appendChild(table); wrapper.appendChild(header); wrapper.appendChild(content); container.appendChild(wrapper);
     });
   }
@@ -622,10 +781,10 @@ async function renderAnalyticsScreen() {
 }
 
 // ==========================================
-// 🔍 設定画面＆出題セット生成
+//  設定画面＆プレビュー・出題セット生成
 // ==========================================
 async function getFilteredCards() {
-  const allCards = await getAllFromStore('cards');
+  const allCards = CardManager.getAll(); 
   const allProgress = await getAllFromStore('progress');
   const allAttempts = await getAllFromStore('attempts');
   const progMap = new Map(allProgress.map(p =>[p.cardId, p]));
@@ -688,11 +847,11 @@ async function updateConfigPreview() {
 
   const chunkSize = parseInt(document.getElementById('config-chunk-size').value) || 20;
   const chunkSelect = document.getElementById('config-chunk-select');
-  chunkSelect.innerHTML = '';
+  clearEl(chunkSelect);
   document.getElementById('config-set-preview').style.display = 'none';
   
   if (filtered.length === 0) {
-    chunkSelect.innerHTML = '<option value="0">データがありません</option>';
+    chunkSelect.appendChild(createEl('option', { value: '0', textContent: 'データがありません' }));
     return;
   }
 
@@ -700,20 +859,26 @@ async function updateConfigPreview() {
   for (let i = 0; i < numChunks; i++) {
     const start = i * chunkSize + 1;
     const end = Math.min((i + 1) * chunkSize, filtered.length);
-    chunkSelect.innerHTML += `<option value="${i}">第${i + 1}セット (${start}〜${end}問)</option>`;
+    chunkSelect.appendChild(createEl('option', { value: i, textContent: `第${i + 1}セット (${start}〜${end}問)` }));
   }
 }
 
 async function prepareConfigScreen() {
-  const cards = await getAllFromStore('cards');
+  const cards = CardManager.getAll();
   const configForm = document.querySelector('.config-form');
   let spanSelect = document.getElementById('config-span');
   
   if (AppState.entryType === 'weak') {
     if (!spanSelect) {
-      const label = document.createElement('label');
-      label.id = 'label-config-span';
-      label.innerHTML = `集計期間: <select id="config-span"><option value="30">直近30日</option><option value="7">直近7日</option><option value="90">直近90日</option><option value="all">全期間</option></select>`;
+      const label = createEl('label', { id: 'label-config-span' },[
+        '集計期間: ',
+        createEl('select', { id: 'config-span' },[
+          createEl('option', { value: '30', textContent: '直近30日' }),
+          createEl('option', { value: '7', textContent: '直近7日' }),
+          createEl('option', { value: '90', textContent: '直近90日' }),
+          createEl('option', { value: 'all', textContent: '全期間' })
+        ])
+      ]);
       configForm.insertBefore(label, document.getElementById('filter-flags').parentElement.previousElementSibling);
     }
   } else {
@@ -727,14 +892,18 @@ async function prepareConfigScreen() {
       if (c.equipmentCategory) c.equipmentCategory.forEach(eq => eqSet.add(eq));
     });
     eqSet.forEach(eq => {
-      eqContainer.innerHTML += `<label class="checkbox-label"><input type="checkbox" value="${eq}" class="chk-eq"> ${eq}</label>`;
+      const lbl = createEl('label', { className: 'checkbox-label' },[
+        createEl('input', { type: 'checkbox', value: eq, className: 'chk-eq' }),
+        document.createTextNode(` ${eq}`)
+      ]);
+      eqContainer.appendChild(lbl);
     });
   }
   await updateConfigPreview();
 }
 
 // ==========================================
-// セッション制御 (順序指定・もう一度機能対応)
+// セッション制御
 // ==========================================
 async function startSession() {
   const mode = document.getElementById('config-mode').value;
@@ -756,7 +925,6 @@ async function startSession() {
       cards =[];
     }
 
-    // ★ 区間(セット)抽出時の「順序指定」処理
     const order = document.getElementById('config-chunk-order').value;
     if (order === 'reverse') cards.reverse();
     if (order === 'random') cards.sort(() => Math.random() - 0.5);
@@ -764,13 +932,10 @@ async function startSession() {
   
   if (cards.length === 0) return alert("条件・絞り込みに一致する問題がありません！");
 
-  // ★「もう一度」機能のために今回の設定を保存
   AppState.lastSession = { cards: [...cards], mode };
-
   initAndRunSession(cards, mode);
 }
 
-// 「もう一度」ボタンの処理
 function retrySession() {
   if (!AppState.lastSession) return;
   initAndRunSession([...AppState.lastSession.cards], AppState.lastSession.mode);
@@ -815,10 +980,9 @@ function renderCard() {
   const activeMode = s.mode === 'test' ? state.testType : s.mode;
 
   document.getElementById('session-progress').textContent = `${s.currentIndex + 1} / ${s.cards.length}`;
-  updateSessionCorrectIndicator(); // リアルタイム正答数の表示
+  updateSessionCorrectIndicator();
 
   document.getElementById('badge-equipment').textContent = card.equipmentCategory?.join(', ') || '分類なし';
-  
   const sysBadge = document.getElementById('badge-system');
   if(card.systemNumber) {
     sysBadge.style.display = 'inline-block';
@@ -842,16 +1006,20 @@ function renderCard() {
   const detailsEl = document.getElementById('card-details');
   
   detailsEl.style.display = 'none';
-  judgeEl.textContent = '';
+  clearEl(judgeEl);
   qEl.textContent = (activeMode === 'normal' || activeMode === 'rev1') ? card.abbr : card.ja;
 
   document.getElementById('btn-prev').disabled = (s.currentIndex === 0);
   document.getElementById('btn-ans').disabled = state.judged;
 
+  const btnNext = document.getElementById('btn-next');
+  clearEl(btnNext);
   if (s.currentIndex === s.cards.length - 1) {
-    document.getElementById('btn-next').innerHTML = `<span>結果を見る ▶</span><span class="shortcut-key">[4 / Enter]</span>`;
+    btnNext.appendChild(createEl('span', { textContent: '結果を見る ▶' }));
+    btnNext.appendChild(createEl('span', { className: 'shortcut-key', textContent: '[4 / Enter]' }));
   } else {
-    document.getElementById('btn-next').innerHTML = `<span>次へ ▶</span><span class="shortcut-key">[4 / Enter]</span>`;
+    btnNext.appendChild(createEl('span', { textContent: '次へ ▶' }));
+    btnNext.appendChild(createEl('span', { className: 'shortcut-key', textContent: '[4 / Enter]' }));
   }
 
   if (activeMode === 'rev1' || activeMode === 'rev2') {
@@ -872,9 +1040,6 @@ function renderCard() {
   }
 }
 
-// ==========================================
-// 解答・判定ロジック
-// ==========================================
 async function handleAnswer() {
   const s = AppState.session;
   const card = s.cards[s.currentIndex];
@@ -991,7 +1156,6 @@ function endSession() {
   const s = AppState.session;
   if (s.timerInterval) clearInterval(s.timerInterval);
   
-  // ★ 正答率の計算方法の改修（「✔を押した数 / セッションの全問題数」で計算）
   const total = s.cards.length;
   const correctCount = s.results.filter(r => r.isCorrect).length;
   const accuracy = total > 0 ? Math.round((correctCount / total) * 100) : 0;
@@ -1003,3 +1167,8 @@ function endSession() {
 
   showScreen('result');
 }
+
+
+window.addEventListener('pagehide', () => {
+  CardManager.clear(); 
+});
