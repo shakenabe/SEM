@@ -2,9 +2,10 @@
 // データベース初期化 (IndexedDB)
 // ==========================================
 const DB_NAME = 'FlashcardAppDB';
-const DB_VERSION = 2;
-
+const DB_VERSION = 3; 
 let db;
+
+window.dbInitPromise = initDB().then(() => console.log('DB Initialized (Ver 3 - No Cards Storage)'));
 
 function initDB() {
   return new Promise((resolve, reject) => {
@@ -12,13 +13,12 @@ function initDB() {
 
     request.onupgradeneeded = (e) => {
       const db = e.target.result;
-      if (e.oldVersion < 2 && db.objectStoreNames.contains('cards')) {
+
+      if (db.objectStoreNames.contains('cards')) {
         db.deleteObjectStore('cards');
       }
-      if (!db.objectStoreNames.contains('cards')) {
-        const cardsOS = db.createObjectStore('cards', { keyPath: 'id' });
-        cardsOS.createIndex('equipmentCategory', 'equipmentCategory', { multiEntry: true });
-      }
+      
+
       if (!db.objectStoreNames.contains('progress')) {
         db.createObjectStore('progress', { keyPath: 'cardId' });
       }
@@ -38,6 +38,11 @@ function initDB() {
 
 async function getAllFromStore(storeName) {
   return new Promise((resolve, reject) => {
+    if (storeName === 'cards') {
+
+      resolve([]);
+      return;
+    }
     const tx = db.transaction(storeName, 'readonly');
     const req = tx.objectStore(storeName).getAll();
     req.onsuccess = () => resolve(req.result);
@@ -46,7 +51,7 @@ async function getAllFromStore(storeName) {
 }
 
 // ==========================================
-// CSVパーサー (グローバルに露出して app.js からも使えるようにする)
+// CSVパーサー & メモリ上への読み込み
 // ==========================================
 window.parseCSV = function(csvText) {
   const rows =[]; let currentRow =[]; let currentCell = ''; let insideQuotes = false;
@@ -74,22 +79,17 @@ window.parseCSV = function(csvText) {
   return rows;
 };
 
-// ==========================================
-// ★マッピング対応版 インポート処理
-// ==========================================
-// mapping引数には { equipmentCategory: 1, abbr: 3, ja: 5 ... } のようなインデックスの対応表が入る
-async function importCSV(csvText, mapping = null) {
+// DBに保存せず、メモリ上で扱うための配列を生成して返すだけにする
+window.parseCardsFromCSV = function(csvText, mapping = null) {
   const rows = window.parseCSV(csvText);
   if (rows.length < 2) throw new Error('データがありません');
 
   const dataRows = rows.slice(1);
-  const newCardsMap = new Map();
+  const parsedCards =[];
 
   for (const row of dataRows) {
-    // マッピングで指定された列の値を取得する安全な関数
     const getVal = (key) => (mapping && mapping[key] !== -1 && mapping[key] !== undefined && row[mapping[key]] !== undefined) ? row[mapping[key]] : '';
     
-    // マッピングが渡されなかった場合は互換性のため旧インデックスをデフォルトとする
     const equipmentCategoryStr = mapping ? getVal('equipmentCategory') : (row[0] || '');
     const targetMachine = mapping ? getVal('targetMachine') : (row[1] || '');
     const systemNumber = mapping ? getVal('systemNumber') : (row[2] || '');
@@ -99,49 +99,32 @@ async function importCSV(csvText, mapping = null) {
     const outline = mapping ? getVal('outline') : (row[6] || '');
     const overview = mapping ? getVal('overview') : (row[7] || '');
 
-    if (!abbr || !ja) continue; // 略語と日本語は必須
+    if (!abbr || !ja) continue;
 
+    // ハッシュIDを生成 (このIDを使って学習履歴と紐づける)
     const id = btoa(encodeURIComponent(`${abbr}_${ja}`));
-    newCardsMap.set(id, {
+    parsedCards.push({
       id,
-      equipmentCategory: equipmentCategoryStr ? equipmentCategoryStr.split('|') :[],
+      equipmentCategory: equipmentCategoryStr ? equipmentCategoryStr.split('|').map(s=>s.trim()) :[],
       targetMachine, systemNumber, abbr, fullSpell, ja, outline, overview,
       updatedAt: Date.now()
     });
   }
 
-  if (newCardsMap.size === 0) throw new Error('有効なデータ(略語と日本語が存在する行)が見つかりませんでした。');
-
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(['cards'], 'readwrite');
-    const store = tx.objectStore('cards');
-    let deletedCount = 0;
-    let updatedOrAddedCount = 0;
-
-    const reqKeys = store.getAllKeys();
-    reqKeys.onsuccess = () => {
-      const existingKeys = reqKeys.result;
-      existingKeys.forEach(key => {
-        if (!newCardsMap.has(key)) { store.delete(key); deletedCount++; }
-      });
-      newCardsMap.forEach(card => { store.put(card); updatedOrAddedCount++; });
-    };
-    tx.oncomplete = () => resolve({ updated: updatedOrAddedCount, deleted: deletedCount });
-    tx.onerror = (e) => reject(e.target.error);
-  });
-}
+  if (parsedCards.length === 0) throw new Error('有効なデータが見つかりませんでした。');
+  return parsedCards;
+};
 
 // ==========================================
-// バックアップ
+// バックアップ処理（履歴のみ）
 // ==========================================
-async function exportBackup(includeCards) {
+async function exportBackup() {
   const backupData = {
     timestamp: Date.now(),
     version: DB_VERSION,
     progress: await getAllFromStore('progress'),
     attempts: await getAllFromStore('attempts')
   };
-  if (includeCards) backupData.cards = await getAllFromStore('cards');
   return JSON.stringify(backupData);
 }
 
@@ -149,11 +132,7 @@ async function importBackup(jsonString) {
   const data = JSON.parse(jsonString);
   if (!data.timestamp || !data.version) throw new Error("無効なバックアップファイルです。");
   return new Promise((resolve, reject) => {
-    const tx = db.transaction(['cards', 'progress', 'attempts'], 'readwrite');
-    if (data.cards && Array.isArray(data.cards)) {
-      const cardsStore = tx.objectStore('cards');
-      data.cards.forEach(c => cardsStore.put(c));
-    }
+    const tx = db.transaction(['progress', 'attempts'], 'readwrite');
     if (data.progress && Array.isArray(data.progress)) {
       const progStore = tx.objectStore('progress');
       data.progress.forEach(p => progStore.put(p));
@@ -175,5 +154,3 @@ async function clearStore(storeName) {
     req.onerror = (e) => reject(e.target.error);
   });
 }
-
-initDB().then(() => console.log('DB Initialized (Ver 2)'));
