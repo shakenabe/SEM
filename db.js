@@ -1,11 +1,12 @@
 // ==========================================
 // データベース初期化 (IndexedDB)
+// ★ 通常版: cards(問題文)をPCに永続保存する仕様
 // ==========================================
 const DB_NAME = 'FlashcardAppDB';
-const DB_VERSION = 3; 
-let db;
+const DB_VERSION = 4; // バージョンを上げてcardsストアを再作成
 
-window.dbInitPromise = initDB().then(() => console.log('DB Initialized (Ver 3 - No Cards Storage)'));
+let db;
+window.dbInitPromise = initDB().then(() => console.log('DB Initialized (Ver 4 - Cards Storage Restored)'));
 
 function initDB() {
   return new Promise((resolve, reject) => {
@@ -13,12 +14,13 @@ function initDB() {
 
     request.onupgradeneeded = (e) => {
       const db = e.target.result;
-
-      if (db.objectStoreNames.contains('cards')) {
-        db.deleteObjectStore('cards');
+      
+      // バージョンアップに伴い、ストアを確保
+      if (!db.objectStoreNames.contains('cards')) {
+        const cardsOS = db.createObjectStore('cards', { keyPath: 'id' });
+        cardsOS.createIndex('equipmentCategory', 'equipmentCategory', { multiEntry: true });
       }
       
-
       if (!db.objectStoreNames.contains('progress')) {
         db.createObjectStore('progress', { keyPath: 'cardId' });
       }
@@ -36,13 +38,9 @@ function initDB() {
   });
 }
 
+// 汎用データ取得ヘルパー
 async function getAllFromStore(storeName) {
   return new Promise((resolve, reject) => {
-    if (storeName === 'cards') {
-
-      resolve([]);
-      return;
-    }
     const tx = db.transaction(storeName, 'readonly');
     const req = tx.objectStore(storeName).getAll();
     req.onsuccess = () => resolve(req.result);
@@ -51,8 +49,24 @@ async function getAllFromStore(storeName) {
 }
 
 // ==========================================
-// CSVパーサー & メモリ上への読み込み
+// CSVパーサー 
 // ==========================================
+// XSS対策のサニタイズ
+function sanitize(str) {
+  if (!str) return '';
+  return String(str).replace(/[<>&"'`]/g, '');
+}
+
+// ハッシュIDの生成
+function hashId(str) {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    hash = (hash << 5) - hash + str.charCodeAt(i);
+    hash |= 0;
+  }
+  return btoa(String(hash)).replace(/[^a-zA-Z0-9]/g, '').slice(0, 12);
+}
+
 window.parseCSV = function(csvText) {
   const rows =[]; let currentRow =[]; let currentCell = ''; let insideQuotes = false;
   for (let i = 0; i < csvText.length; i++) {
@@ -63,9 +77,9 @@ window.parseCSV = function(csvText) {
       else { currentCell += char; }
     } else {
       if (char === '"') insideQuotes = true;
-      else if (char === ',') { currentRow.push(currentCell.trim()); currentCell = ''; }
+      else if (char === ',') { currentRow.push(sanitize(currentCell.trim())); currentCell = ''; }
       else if (char === '\n' || char === '\r') {
-        currentRow.push(currentCell.trim());
+        currentRow.push(sanitize(currentCell.trim()));
         if (currentRow.join('') !== '') rows.push(currentRow);
         currentRow =[]; currentCell = '';
         if (char === '\r' && nextChar === '\n') i++;
@@ -73,24 +87,25 @@ window.parseCSV = function(csvText) {
     }
   }
   if (currentCell || currentRow.length > 0) {
-    currentRow.push(currentCell.trim());
+    currentRow.push(sanitize(currentCell.trim()));
     if (currentRow.join('') !== '') rows.push(currentRow);
   }
   return rows;
 };
 
-// DBに保存せず、メモリ上で扱うための配列を生成して返すだけにする
-window.parseCardsFromCSV = function(csvText, mapping = null) {
+// ★ マッピング情報を利用したインポート処理 (DBに保存)
+window.importCSV = async function(csvText, mapping = null) {
   const rows = window.parseCSV(csvText);
   if (rows.length < 2) throw new Error('データがありません');
 
   const dataRows = rows.slice(1);
-  const parsedCards =[];
+  const newCardsMap = new Map();
 
   for (const row of dataRows) {
     const getVal = (key) => (mapping && mapping[key] !== -1 && mapping[key] !== undefined && row[mapping[key]] !== undefined) ? row[mapping[key]] : '';
     
-    const equipmentCategoryStr = mapping ? getVal('equipmentCategory') : (row[0] || '');
+    const eqStr = mapping ? getVal('equipmentCategory') : (row[0] || '');
+    const equipmentCategory = eqStr ? eqStr.split('|').map(s => s.trim()) :[];
     const targetMachine = mapping ? getVal('targetMachine') : (row[1] || '');
     const systemNumber = mapping ? getVal('systemNumber') : (row[2] || '');
     const abbr = mapping ? getVal('abbr') : (row[3] || '');
@@ -101,38 +116,56 @@ window.parseCardsFromCSV = function(csvText, mapping = null) {
 
     if (!abbr || !ja) continue;
 
-    // ハッシュIDを生成 (このIDを使って学習履歴と紐づける)
-    const id = btoa(encodeURIComponent(`${abbr}_${ja}`));
-    parsedCards.push({
-      id,
-      equipmentCategory: equipmentCategoryStr ? equipmentCategoryStr.split('|').map(s=>s.trim()) :[],
-      targetMachine, systemNumber, abbr, fullSpell, ja, outline, overview,
-      updatedAt: Date.now()
+    const id = hashId(`${abbr}_${ja}`);
+    newCardsMap.set(id, {
+      id, equipmentCategory, targetMachine, systemNumber, abbr, fullSpell, ja, outline, overview, updatedAt: Date.now()
     });
   }
 
-  if (parsedCards.length === 0) throw new Error('有効なデータが見つかりませんでした。');
-  return parsedCards;
+  if (newCardsMap.size === 0) throw new Error('有効なデータが見つかりませんでした。');
+
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(['cards'], 'readwrite');
+    const store = tx.objectStore('cards');
+    let deletedCount = 0;
+    let updatedOrAddedCount = 0;
+
+    const reqKeys = store.getAllKeys();
+    reqKeys.onsuccess = () => {
+      const existingKeys = reqKeys.result;
+      existingKeys.forEach(key => {
+        if (!newCardsMap.has(key)) { store.delete(key); deletedCount++; }
+      });
+      newCardsMap.forEach(card => { store.put(card); updatedOrAddedCount++; });
+    };
+    tx.oncomplete = () => resolve({ updated: updatedOrAddedCount, deleted: deletedCount });
+    tx.onerror = (e) => reject(e.target.error);
+  });
 };
 
 // ==========================================
-// バックアップ処理（履歴のみ）
+// バックアップ
 // ==========================================
-async function exportBackup() {
+window.exportBackup = async function(includeCards) {
   const backupData = {
     timestamp: Date.now(),
     version: DB_VERSION,
     progress: await getAllFromStore('progress'),
     attempts: await getAllFromStore('attempts')
   };
+  if (includeCards) backupData.cards = await getAllFromStore('cards');
   return JSON.stringify(backupData);
-}
+};
 
-async function importBackup(jsonString) {
+window.importBackup = async function(jsonString) {
   const data = JSON.parse(jsonString);
   if (!data.timestamp || !data.version) throw new Error("無効なバックアップファイルです。");
   return new Promise((resolve, reject) => {
-    const tx = db.transaction(['progress', 'attempts'], 'readwrite');
+    const tx = db.transaction(['cards', 'progress', 'attempts'], 'readwrite');
+    if (data.cards && Array.isArray(data.cards)) {
+      const cardsStore = tx.objectStore('cards');
+      data.cards.forEach(c => cardsStore.put(c));
+    }
     if (data.progress && Array.isArray(data.progress)) {
       const progStore = tx.objectStore('progress');
       data.progress.forEach(p => progStore.put(p));
@@ -144,13 +177,13 @@ async function importBackup(jsonString) {
     tx.oncomplete = () => resolve();
     tx.onerror = (e) => reject(e.target.error);
   });
-}
+};
 
-async function clearStore(storeName) {
+window.clearStore = async function(storeName) {
   return new Promise((resolve, reject) => {
     const tx = db.transaction([storeName], 'readwrite');
     const req = tx.objectStore(storeName).clear();
     req.onsuccess = () => resolve();
     req.onerror = (e) => reject(e.target.error);
   });
-}
+};
