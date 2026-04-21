@@ -1,94 +1,3 @@
-
-setInterval(() => {
-  if (window.outerWidth - window.innerWidth > 200 || window.outerHeight - window.innerHeight > 200) {
-    document.body.textContent = 'Security Policy Violation Detected.';
-  }
-}, 1000);
-
-
-const CardManager = (function() {
-  let _data =[]; 
-
-
-  function sanitize(str) {
-    if (!str) return '';
-    return String(str).replace(/[<>&"'`]/g, '');
-  }
-
-  // IDのハッシュ化 (推測防止)
-  function hashId(str) {
-    let hash = 0;
-    for (let i = 0; i < str.length; i++) {
-      hash = (hash << 5) - hash + str.charCodeAt(i);
-      hash |= 0;
-    }
-    return btoa(String(hash)).replace(/[^a-zA-Z0-9]/g, '').slice(0, 12);
-  }
-
-  // CSVパース (内部で完結)
-  function parseCSV(csvText) {
-    const rows = []; let currentRow =[]; let currentCell = ''; let insideQuotes = false;
-    for (let i = 0; i < csvText.length; i++) {
-      const char = csvText[i], nextChar = csvText[i + 1];
-      if (insideQuotes) {
-        if (char === '"' && nextChar === '"') { currentCell += '"'; i++; }
-        else if (char === '"') { insideQuotes = false; }
-        else { currentCell += char; }
-      } else {
-        if (char === '"') insideQuotes = true;
-        else if (char === ',') { currentRow.push(sanitize(currentCell.trim())); currentCell = ''; }
-        else if (char === '\n' || char === '\r') {
-          currentRow.push(sanitize(currentCell.trim()));
-          if (currentRow.join('') !== '') rows.push(currentRow);
-          currentRow =[]; currentCell = '';
-          if (char === '\r' && nextChar === '\n') i++;
-        } else { currentCell += char; }
-      }
-    }
-    if (currentCell || currentRow.length > 0) {
-      currentRow.push(sanitize(currentCell.trim()));
-      if (currentRow.join('') !== '') rows.push(currentRow);
-    }
-    return rows;
-  }
-
-  return {
-    // データをロード
-    loadFromCSV: function(csvText, mapping) {
-      const rows = parseCSV(csvText);
-      if (rows.length < 2) throw new Error('データがありません');
-      const dataRows = rows.slice(1);
-      const parsed =[];
-
-      for (const row of dataRows) {
-        const getVal = (key) => (mapping && mapping[key] !== -1 && mapping[key] !== undefined && row[mapping[key]] !== undefined) ? row[mapping[key]] : '';
-        
-        const eqStr = mapping ? getVal('equipmentCategory') : (row[0] || '');
-        const equipmentCategory = eqStr ? eqStr.split('|').map(s => s.trim()) : [];
-        const targetMachine = mapping ? getVal('targetMachine') : (row[1] || '');
-        const systemNumber = mapping ? getVal('systemNumber') : (row[2] || '');
-        const abbr = mapping ? getVal('abbr') : (row[3] || '');
-        const fullSpell = mapping ? getVal('fullSpell') : (row[4] || '');
-        const ja = mapping ? getVal('ja') : (row[5] || '');
-        const outline = mapping ? getVal('outline') : (row[6] || '');
-        const overview = mapping ? getVal('overview') : (row[7] || '');
-
-        if (!abbr || !ja) continue;
-
-        const id = hashId(`${abbr}_${ja}`);
-        parsed.push({ id, equipmentCategory, targetMachine, systemNumber, abbr, fullSpell, ja, outline, overview, updatedAt: Date.now() });
-      }
-      if (parsed.length === 0) throw new Error('有効なデータが見つかりませんでした。');
-      _data = parsed;
-      return parsed.length;
-    },
-
-    getCount: () => _data.length,
-    getAll: () => _data.map(c => ({...c})), 
-    clear: () => { _data =[]; }
-  };
-})();
-
 // ==========================================
 // 状態管理・グローバル変数
 // ==========================================
@@ -104,7 +13,7 @@ const AppState = {
 };
 
 // ==========================================
-// ユーティリティ・DOM生成ヘルパー (innerHTML排除用)
+// ユーティリティ・DOM生成ヘルパー (XSS対策用)
 // ==========================================
 function clearEl(el) { el.textContent = ''; }
 
@@ -181,14 +90,14 @@ function confirmAction(title, message) {
 // ==========================================
 // ホーム画面サマリー更新
 // ==========================================
-function updateHomeSummary() {
-  const count = CardManager.getCount();
+async function updateHomeSummary() {
+  const cards = await getAllFromStore('cards');
   const summaryEl = document.getElementById('home-data-summary');
   const menuBtns = document.querySelectorAll('.main-menu-btn');
   
   clearEl(summaryEl);
 
-  if (count === 0) {
+  if (cards.length === 0) {
     summaryEl.style.display = 'none';
     menuBtns.forEach(btn => btn.disabled = true);
     return;
@@ -197,11 +106,10 @@ function updateHomeSummary() {
   summaryEl.style.display = 'block';
   menuBtns.forEach(btn => btn.disabled = false);
   
-  const titleDiv = createEl('div', { className: 'home-summary-title', textContent: `読込済みの問題: ${count} 問` });
+  const titleDiv = createEl('div', { className: 'home-summary-title', textContent: `登録済みの問題: ${cards.length} 問` });
   summaryEl.appendChild(titleDiv);
 
   const eqMap = {};
-  const cards = CardManager.getAll();
   cards.forEach(c => {
     const eqs = (c.equipmentCategory && c.equipmentCategory.length > 0) ? c.equipmentCategory : ['分類なし'];
     eqs.forEach(eq => { eqMap[eq] = (eqMap[eq] || 0) + 1; });
@@ -214,22 +122,12 @@ function updateHomeSummary() {
   summaryEl.appendChild(tagsDiv);
 }
 
-async function getAllFromStore(storeName) {
-  if(storeName === 'cards') return CardManager.getAll();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(storeName, 'readonly');
-    const req = tx.objectStore(storeName).getAll();
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
-  });
-}
-
 // ==========================================
 // 初期化・共通イベントリスナー
 // ==========================================
 document.addEventListener('DOMContentLoaded', async () => {
   if (window.dbInitPromise) await window.dbInitPromise;
-  updateHomeSummary();
+  await updateHomeSummary();
 
   document.querySelectorAll('.menu-btn[data-target]').forEach(btn => {
     btn.addEventListener('click', async (e) => {
@@ -355,31 +253,26 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   // CSV読み込み関連
-  const setupCsvUpload = (btnId, inputId) => {
-    const btn = document.getElementById(btnId);
-    const input = document.getElementById(inputId);
-    if (!btn || !input) return;
+  const triggerImportBtn = document.getElementById('btn-trigger-mapping');
+  const fileInput = document.getElementById('csv-upload');
+  const msgEl = document.getElementById('import-msg');
 
-    btn.addEventListener('click', () => input.click());
-    input.addEventListener('change', (e) => {
-      const file = e.target.files[0];
-      if (!file) return;
+  if(triggerImportBtn && fileInput) {
+    triggerImportBtn.addEventListener('click', () => {
+      const file = fileInput.files[0];
+      if (!file) { msgEl.style.color = "var(--danger-color)"; msgEl.textContent = "ファイルを選択してください。"; return; }
       const reader = new FileReader();
-      reader.onload = (ev) => {
-        currentCsvText = ev.target.result;
-        // マッピング用のヘッダー取得(1行目だけ手動パース)
+      reader.onload = (e) => {
+        currentCsvText = e.target.result;
         const firstLine = currentCsvText.split('\n')[0];
         if(!firstLine) return alert("データがありません。");
         const headers = firstLine.split(',').map(s => s.replace(/"/g, '').trim());
         openMappingModal(headers);
       };
       reader.readAsText(file);
-      input.value = ''; 
+      fileInput.value = ''; 
     });
-  };
-
-  setupCsvUpload('btn-home-select-csv', 'home-csv-upload');
-  setupCsvUpload('btn-trigger-mapping', 'csv-upload');
+  }
 
   function openMappingModal(headers) {
     const container = document.getElementById('csv-mapping-container');
@@ -427,7 +320,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     currentCsvText = '';
   });
 
-  document.getElementById('btn-execute-import').addEventListener('click', () => {
+  document.getElementById('btn-execute-import').addEventListener('click', async () => {
     const selects = document.querySelectorAll('.mapping-select');
     const mapping = {};
     let abbrMapped = false, jaMapped = false;
@@ -442,15 +335,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('modal-csv-mapping').classList.remove('active');
     
     try {
-      const count = CardManager.loadFromCSV(currentCsvText, mapping);
-      const msgH = document.getElementById('home-import-msg');
-      const msgS = document.getElementById('import-msg');
-      const msgText = `🔓 ${count} 件の問題を安全なメモリに展開しました！`;
-      if(msgH) { msgH.style.color = "var(--success-color)"; msgH.textContent = msgText; }
-      if(msgS) { msgS.style.color = "var(--success-color)"; msgS.textContent = msgText; }
+      // IndexedDBへ保存
+      const result = await window.importCSV(currentCsvText, mapping);
+      const msgText = `✅ 成功！ 更新・追加: ${result.updated}件 / 古い問題の削除: ${result.deleted}件`;
+      if(msgEl) { msgEl.style.color = "var(--success-color)"; msgEl.textContent = msgText; }
       
-      updateHomeSummary();
-      if(AppState.currentScreen === 'settings') showScreen('home');
+      localStorage.setItem('lastDataUpdate', Date.now().toString());
+      await updateHomeSummary();
     } catch (err) {
       alert("読み込みエラー: " + err.message);
     }
@@ -460,15 +351,16 @@ document.addEventListener('DOMContentLoaded', async () => {
   // バックアップ・リセット・テーマ
   document.getElementById('btn-export-backup').addEventListener('click', async () => {
     try {
-      const jsonStr = await exportBackup();
+      const includeCards = document.getElementById('backup-include-cards').checked;
+      const jsonStr = await window.exportBackup(includeCards);
       const blob = new Blob([jsonStr], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a'); a.href = url;
       const d = new Date();
-      a.download = `flashcard_history_${d.getFullYear()}${(d.getMonth()+1).toString().padStart(2,'0')}${d.getDate().toString().padStart(2,'0')}_${d.getHours().toString().padStart(2,'0')}${d.getMinutes().toString().padStart(2,'0')}.json`;
+      a.download = `flashcard_backup_${d.getFullYear()}${(d.getMonth()+1).toString().padStart(2,'0')}${d.getDate().toString().padStart(2,'0')}_${d.getHours().toString().padStart(2,'0')}${d.getMinutes().toString().padStart(2,'0')}.json`;
       a.click(); URL.revokeObjectURL(url);
       localStorage.setItem('lastBackupTimestamp', Date.now().toString());
-      alert('学習履歴のバックアップをダウンロードしました。');
+      alert('バックアップをダウンロードしました。');
     } catch (err) { alert('バックアップ失敗: ' + err.message); }
   });
 
@@ -485,12 +377,12 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (lastTime > 0 && backupData.timestamp < lastTime) {
           if (!await confirmAction('⚠️ 警告: 古いバックアップです', '前回保存した時より古いデータです。\n本当に復元しますか？')) return;
         } else {
-          if (!await confirmAction('バックアップの復元', '現在の学習履歴が上書きされます。\n実行してよろしいですか？')) return;
+          if (!await confirmAction('バックアップの復元', '現在のデータが上書きされます。\n実行してよろしいですか？')) return;
         }
-        await importBackup(jsonStr);
+        await window.importBackup(jsonStr);
         localStorage.setItem('lastDataUpdate', Date.now().toString());
-        msg.style.color = "var(--success-color)"; msg.textContent = "学習履歴の復元が完了しました！";
-        updateHomeSummary();
+        msg.style.color = "var(--success-color)"; msg.textContent = "復元が完了しました！";
+        await updateHomeSummary();
       } catch (err) { msg.style.color = "var(--danger-color)"; msg.textContent = "復元エラー: " + err.message; }
     };
     reader.readAsText(file);
@@ -498,15 +390,16 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   document.getElementById('btn-reset-history').addEventListener('click', async () => {
     if(await confirmAction('学習履歴のリセット', '間違えた問題などの履歴のみを削除しますか？')) {
-      await clearStore('progress'); await clearStore('attempts'); alert('履歴をリセットしました。');
+      await window.clearStore('progress'); await window.clearStore('attempts'); alert('履歴をリセットしました。');
     }
   });
 
   document.getElementById('btn-reset-all').addEventListener('click', async () => {
-    if(await confirmAction('全データ完全リセット', '学習履歴をすべて削除しますか？\n(メモリ上の問題データも消去されます)')) {
-      await clearStore('progress'); await clearStore('attempts'); 
-      CardManager.clear();
-      updateHomeSummary(); alert('全リセットしました。');
+    if(await confirmAction('全データ完全リセット', '問題データと学習履歴を【すべて】削除しますか？')) {
+      await window.clearStore('cards');
+      await window.clearStore('progress'); 
+      await window.clearStore('attempts'); 
+      await updateHomeSummary(); alert('全リセットしました。');
     }
   });
 
@@ -575,7 +468,7 @@ document.addEventListener('keydown', (e) => {
 // 📋 データ一覧画面
 // ==========================================
 async function renderListScreen() {
-  const cards = CardManager.getAll();
+  const cards = await getAllFromStore('cards');
   const select = document.getElementById('list-category-filter');
   const categories = new Set();
   cards.forEach(c => { 
@@ -587,12 +480,12 @@ async function renderListScreen() {
   categories.forEach(cat => { select.appendChild(createEl('option', { value: cat, textContent: cat })); });
   if(!select.onchange) select.addEventListener('change', renderListTable);
   
-  renderListTable();
+  await renderListTable();
   showScreen('list');
 }
 
 async function renderListTable() {
-  const cards = CardManager.getAll();
+  const cards = await getAllFromStore('cards');
   const filterCat = document.getElementById('list-category-filter').value;
   const container = document.getElementById('data-list-container');
   clearEl(container);
@@ -670,10 +563,10 @@ async function renderListTable() {
 }
 
 // ==========================================
-// 学習分析・間違えた問題リスト
+// 📊 学習分析・間違えた問題リスト
 // ==========================================
 async function renderAnalyticsScreen() {
-  const cards = CardManager.getAll();
+  const cards = await getAllFromStore('cards');
   const progress = await getAllFromStore('progress');
   const progMap = new Map(progress.map(p =>[p.cardId, p]));
 
@@ -747,8 +640,7 @@ async function renderAnalyticsScreen() {
       
       const table = document.createElement('table');
       const thead = createEl('thead');
-      const trH = createEl('tr');
-      ['マーク', '略語', '日本語', 'ミス回数', '対象号機'].forEach((t, i) => {
+      const trH = createEl('tr');['マーク', '略語', '日本語', 'ミス回数', '対象号機'].forEach((t, i) => {
         trH.appendChild(createEl('th', { style: i === 0 ? 'min-width: 90px;' : '', textContent: t }));
       });
       thead.appendChild(trH);
@@ -781,10 +673,10 @@ async function renderAnalyticsScreen() {
 }
 
 // ==========================================
-//  設定画面＆プレビュー・出題セット生成
+// 🔍 設定画面＆プレビュー・出題セット生成
 // ==========================================
 async function getFilteredCards() {
-  const allCards = CardManager.getAll(); 
+  const allCards = await getAllFromStore('cards'); 
   const allProgress = await getAllFromStore('progress');
   const allAttempts = await getAllFromStore('attempts');
   const progMap = new Map(allProgress.map(p =>[p.cardId, p]));
@@ -864,7 +756,7 @@ async function updateConfigPreview() {
 }
 
 async function prepareConfigScreen() {
-  const cards = CardManager.getAll();
+  const cards = await getAllFromStore('cards');
   const configForm = document.querySelector('.config-form');
   let spanSelect = document.getElementById('config-span');
   
@@ -1167,8 +1059,3 @@ function endSession() {
 
   showScreen('result');
 }
-
-
-window.addEventListener('pagehide', () => {
-  CardManager.clear(); 
-});
