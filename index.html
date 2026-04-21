@@ -23,16 +23,11 @@
 
     * { box-sizing: border-box; }
     
-    /* ★ セキュリティ対策 レベル1: テキスト選択の禁止 */
+    /* セキュリティ制限(user-select: none 等)を完全撤廃 */
     body { 
       font-family: 'Helvetica Neue', Arial, sans-serif; 
       background-color: var(--bg-color); color: var(--text-color); margin: 0; padding: 15px; 
       transition: background-color 0.3s; 
-      -webkit-user-select: none; -moz-user-select: none; -ms-user-select: none; user-select: none; 
-    }
-    /* テキスト入力欄だけは選択・入力を許可する */
-    input[type="text"], input[type="file"] {
-      -webkit-user-select: auto; -moz-user-select: auto; -ms-user-select: auto; user-select: auto;
     }
 
     .screen { display: none; max-width: 800px; margin: 0 auto; animation: fadeIn 0.3s ease; }
@@ -70,6 +65,7 @@
     .folder-header::after { content: "▼"; font-size: 0.8rem; transition: transform 0.3s; }
     .folder-header.closed::after { transform: rotate(-90deg); }
     .folder-content.closed { display: none; }
+    
     .set-preview-container { background: var(--bg-color); border: 1px solid var(--border-color); border-radius: 8px; padding: 10px; margin-top: 10px; max-height: 250px; overflow-y: auto; font-size: 0.9rem; text-align: left;}
     .set-preview-item { border-bottom: 1px solid var(--border-color); padding: 6px 0; }
     .set-preview-item:last-child { border-bottom: none; }
@@ -124,39 +120,27 @@
   <div id="screen-home" class="screen active">
     <h1>暗記カード学習アプリ</h1>
 
-    <!-- ★ レベル4 セキュリティ: 毎回ファイル読み込みエリア -->
-    <div class="settings-section" style="text-align: center; border: 2px dashed var(--primary-color); background: rgba(59, 130, 246, 0.05);">
-      <h3 style="margin-top: 0; color: var(--primary-color);">🔒 問題データの読み込み</h3>
-      <p style="font-size: 0.85rem; color: #666; margin-bottom: 15px;">アプリを起動するたびにCSVファイルを選択してください。
-      </p>
-      <input type="file" id="home-csv-upload" accept=".csv" style="display: none;">
-      <button id="btn-home-select-csv" class="primary-btn" style="margin: 0 auto; flex-direction:row; padding: 15px 30px; font-size: 1.1rem;">
-        📂 CSVファイルを選択
-      </button>
-      <p id="home-import-msg" style="font-weight: bold; margin-top: 10px;"></p>
-    </div>
-
-    <!-- サマリー（ファイル読み込み後に表示） -->
+    <!-- サマリー表示 -->
     <div class="home-summary" id="home-data-summary" style="display: none;">
       <div style="text-align:center;">データを読み込んでいます...</div>
     </div>
 
-    <!-- メニュー (ファイル読み込み前は disabled になります) -->
+    <!-- メニュー -->
     <div class="menu">
-      <button class="menu-btn main-menu-btn" data-target="config" data-entry="normal" disabled>📖 通常学習</button>
-      <button class="menu-btn main-menu-btn" data-target="config" data-entry="wrong" disabled>⚠️ 間違いを見直し</button>
-      <button class="menu-btn main-menu-btn" data-target="config" data-entry="weak" disabled>📉 苦手な問題</button>
-      <button class="menu-btn main-menu-btn" data-target="config" data-entry="stale" disabled>⏳ 最近未回答</button>
-      <button class="menu-btn main-menu-btn" id="btn-go-analytics" style="background: var(--success-color); color: white;" disabled>📊 学習分析</button>
-      <button class="menu-btn main-menu-btn" id="btn-go-list" disabled>📋 データ一覧</button>
+      <button class="menu-btn main-menu-btn" data-target="config" data-entry="normal">📖 通常学習</button>
+      <button class="menu-btn main-menu-btn" data-target="config" data-entry="wrong">⚠️ 間違いを見直し</button>
+      <button class="menu-btn main-menu-btn" data-target="config" data-entry="weak">📉 苦手な問題</button>
+      <button class="menu-btn main-menu-btn" data-target="config" data-entry="stale">⏳ 最近未回答</button>
+      <button class="menu-btn main-menu-btn" id="btn-go-analytics" style="background: var(--success-color); color: white;">📊 学習分析</button>
+      <button class="menu-btn main-menu-btn" id="btn-go-list">📋 データ一覧</button>
       <button class="menu-btn" data-target="settings">⚙️ アプリ設定</button>
     </div>
   </div>
 
   <div id="screen-list" class="screen" style="max-width: 1100px;">
-    <h2>📋 データ一覧 (分類別)</h2>
+    <h2>📋 データ一覧 (設備分類別)</h2>
     <div style="display: flex; justify-content: space-between; margin-bottom: 15px; flex-wrap: wrap; gap: 10px;">
-      <label>分類: <select id="list-category-filter" style="padding: 5px; border-radius: 5px;"><option value="all">すべて</option></select></label>
+      <label>設備分類: <select id="list-category-filter" style="padding: 5px; border-radius: 5px;"><option value="all">すべて</option></select></label>
       <span>合計: <strong id="list-total-count">0</strong> 件</span>
     </div>
     <div id="data-list-container"></div>
@@ -170,16 +154,16 @@
       <div class="stat-card"><h4>全体正答率</h4><div class="value" id="stat-accuracy">0%</div></div>
     </div>
     <div class="settings-section">
-      <h3 style="margin-top:0;">📂 分類ごとの正答率</h3>
+      <h3 style="margin-top:0;">📂 設備分類ごとの正答率</h3>
       <div class="table-responsive">
         <table id="analytics-cat-table">
-          <thead><tr><th>分類</th><th>問題数</th><th>学習済</th><th>正答率</th></tr></thead>
-          <tbody><!-- 動的生成 --></tbody>
+          <thead><tr><th>設備分類</th><th>問題数</th><th>学習済</th><th>正答率</th></tr></thead>
+          <tbody></tbody>
         </table>
       </div>
     </div>
     <div class="settings-section">
-      <h3 style="color: var(--danger-color); margin-top:0;">⚠️ 間違えた問題リスト (分類別)</h3>
+      <h3 style="color: var(--danger-color); margin-top:0;">⚠️ 間違えた問題リスト (設備分類別)</h3>
       <div id="analytics-wrong-container"></div>
     </div>
     <div style="text-align: center;"><button class="nav-home" style="flex-direction:row;">ホームに戻る</button></div>
@@ -194,7 +178,7 @@
         <label class="checkbox-label"><input type="checkbox" value="uneasy" class="chk-flag"> 😰 不安</label>
         <label class="checkbox-label"><input type="checkbox" value="mistake" class="chk-flag"> ⚠️ ミス注意</label>
       </div>
-      <label>分類:</label>
+      <label>設備分類:</label>
       <div id="filter-equipments" class="checkbox-group"></div>
       
       <div class="target-count-box" id="config-target-count-display">絞り込み対象: 計算中...</div>
@@ -289,22 +273,34 @@
       <p>正解数: <strong id="res-correct" style="color:var(--success-color);">0</strong> / <span id="res-total">0</span></p>
       <p>正解率: <strong id="res-accuracy" style="color:var(--primary-color);">0</strong>%</p>
     </div>
+    
     <div style="display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;">
-      <button id="btn-retry-session" class="primary-btn" style="flex-direction:row;">🔄 もう一度[Enter]</button>
-      <button id="btn-review-wrong" class="warning-btn" style="display:none; flex-direction:row;">間違えた問題を復習[R]</button>
-      <button class="nav-home" style="flex-direction:row;">ホームに戻る[H]</button>
+      <button id="btn-retry-session" class="primary-btn" style="flex-direction:row;">🔄 もう一度</button>
+      <button id="btn-review-wrong" class="warning-btn" style="display:none; flex-direction:row;">間違えた問題を復習</button>
+      <button class="nav-home" style="flex-direction:row;">ホームに戻る</button>
     </div>
   </div>
 
   <div id="screen-settings" class="screen">
     <h2>⚙️ アプリ設定</h2>
     
-
     <div class="settings-section">
-      <h3>データのバックアップ・復元</h3>
-      <p style="font-size: 0.85rem; color: #666; margin-bottom:15px;">「スコアや間違えた履歴」のみを保存します。</p>
+      <h3>① 問題データの追加・更新 (CSV)</h3>
+      <p style="font-size: 0.85rem; color: #666; margin-bottom:10px;">列名が違っても次の画面で割り当てを修正できます。</p>
+      <input type="file" id="csv-upload" accept=".csv">
+      <button id="btn-trigger-mapping" class="primary-btn" style="width:100%; margin-top:10px; flex-direction:row;">CSVを読み込む</button>
+      <p id="import-msg" style="text-align: center; font-weight: bold; margin-top: 10px;"></p>
+    </div>
+    
+    <div class="settings-section">
+      <h3>② データのバックアップ・復元</h3>
       <div style="margin-bottom: 15px; text-align: left;">
-        <button id="btn-export-backup" class="primary-btn" style="width:100%; flex-direction:row;">学習履歴をダウンロード</button>
+        <label style="display: flex; align-items: center; gap: 5px; cursor: pointer; margin-bottom: 10px;">
+          <!-- セキュリティ版で消していた「問題データを含める」を復活 -->
+          <input type="checkbox" id="backup-include-cards" checked>
+          問題データも含めて保存する
+        </label>
+        <button id="btn-export-backup" class="primary-btn" style="width:100%; flex-direction:row;">バックアップをダウンロード</button>
       </div>
       <hr style="border: 0; border-top: 1px solid var(--border-color); margin: 15px 0;">
       <div style="text-align: left;">
@@ -315,9 +311,10 @@
       </div>
     </div>
     <div class="settings-section">
-      <h3>学習履歴のリセット</h3>
+      <h3>データのリセット</h3>
       <div style="display: flex; flex-direction: column; gap: 10px;">
-        <button id="btn-reset-history" class="danger-btn" style="flex-direction:row;">学習履歴をすべて削除</button>
+        <button id="btn-reset-history" class="warning-btn" style="flex-direction:row;">学習履歴のみリセット</button>
+        <button id="btn-reset-all" class="danger-btn" style="flex-direction:row;">全データ完全リセット</button>
       </div>
     </div>
     <div class="settings-section">
@@ -353,8 +350,8 @@
   <div id="modal-confirm" class="modal">
     <div class="modal-content">
       <h3 id="confirm-title" style="color: var(--danger-color);">確認</h3>
-      <p id="confirm-message">本当に実行しますか？</p>
-      <p style="font-size:0.85rem; color:#666;">[Enter/Y]: はい　[Esc/N]: キャンセル</p>
+      <div id="confirm-message">本当に実行しますか？</div>
+      <p style="font-size:0.85rem; color:#666; margin-top:10px;">[Enter/Y]: はい　[Esc/N]: キャンセル</p>
       <div class="modal-actions"><button id="btn-confirm-yes" class="danger-btn" style="flex-direction:row;">はい</button><button id="btn-confirm-no" style="flex-direction:row;">キャンセル</button></div>
     </div>
   </div>
