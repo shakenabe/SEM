@@ -1,242 +1,362 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>LifeOS Pro Max - Cyber Edition</title>
-    <link rel="stylesheet" href="style.css">
-    <link href="https://fonts.googleapis.com/css2?family=DotGothic16&display=swap" rel="stylesheet">
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>暗記カード学習アプリ</title>
+  <style>
+    /* 共通変数・テーマ設定 */
+    :root {
+      --bg-color: #f3f4f6; --text-color: #1f2937; --card-bg: #ffffff;
+      --primary-color: #3b82f6; --primary-hover: #2563eb;
+      --danger-color: #ef4444; --danger-hover: #dc2626;
+      --success-color: #10b981; --success-hover: #059669;
+      --warning-color: #f59e0b; --warning-hover: #d97706;
+      --border-color: #e5e7eb;
+      --shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+    }[data-theme="dark"] {
+      --bg-color: #111827; --text-color: #f3f4f6; --card-bg: #1f2937;
+      --primary-color: #60a5fa; --primary-hover: #3b82f6;
+      --border-color: #374151;
+      --shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.5);
+    }
+
+    * { box-sizing: border-box; }
+    
+    /* セキュリティ制限(user-select: none 等)を完全撤廃 */
+    body { 
+      font-family: 'Helvetica Neue', Arial, sans-serif; 
+      background-color: var(--bg-color); color: var(--text-color); margin: 0; padding: 15px; 
+      transition: background-color 0.3s; 
+    }
+
+    .screen { display: none; max-width: 800px; margin: 0 auto; animation: fadeIn 0.3s ease; }
+    .screen.active { display: block; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+    h1, h2, h3 { text-align: center; }
+
+    button { cursor: pointer; padding: 12px 10px; border: none; border-radius: 8px; font-size: 0.95rem; font-weight: bold; background: var(--card-bg); color: var(--text-color); border: 1px solid var(--border-color); box-shadow: 0 1px 2px rgba(0,0,0,0.05); transition: all 0.2s; display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1.2; }
+    button:hover:not(:disabled) { transform: translateY(-1px); box-shadow: var(--shadow); }
+    button:active:not(:disabled) { transform: translateY(1px); }
+    button:disabled { opacity: 0.5; cursor: not-allowed; filter: grayscale(100%); }
+    .shortcut-key { font-size: 0.75rem; opacity: 0.7; margin-top: 4px; font-weight: normal; }
+
+    .primary-btn { background: var(--primary-color); color: white; border: none; }
+    .primary-btn:hover:not(:disabled) { background: var(--primary-hover); }
+    .danger-btn { background: var(--danger-color); color: white; border: none; }
+    .danger-btn:hover:not(:disabled) { background: var(--danger-hover); }
+    .success-btn { background: var(--success-color); color: white; border: none; font-size: 1.1rem; }
+    .success-btn:hover:not(:disabled) { background: var(--success-hover); }
+    .warning-btn { background: var(--warning-color); color: white; border: none; }
+
+    .flag-btn { background: transparent; border: 1px solid var(--border-color); color: var(--text-color); padding: 6px 10px; border-radius: 20px; font-size: 0.85rem; cursor: pointer; transition: 0.2s; flex-direction: row; gap: 5px; box-shadow: none; }
+    .flag-btn:hover { background: var(--border-color); }
+    .flag-btn[data-flag="uneasy"].active { background: #fef08a; border-color: #facc15; color: #854d0e; }
+    .flag-btn[data-flag="mistake"].active { background: #fecaca; border-color: #f87171; color: #991b1b; }[data-theme="dark"] .flag-btn[data-flag="uneasy"].active { background: #854d0e; border-color: #facc15; color: #fef08a; }[data-theme="dark"] .flag-btn[data-flag="mistake"].active { background: #991b1b; border-color: #f87171; color: #fecaca; }
+
+    .home-summary { background: var(--card-bg); padding: 15px; border-radius: 12px; box-shadow: var(--shadow); margin-bottom: 20px; }
+    .home-summary-title { font-weight: bold; margin-bottom: 10px; text-align: center; }
+    .home-summary-tags { display: flex; flex-wrap: wrap; gap: 5px; justify-content: center; }
+    .home-summary-tag { background: var(--bg-color); border: 1px solid var(--border-color); padding: 5px 12px; border-radius: 15px; font-size: 0.85rem; }
+
+    .folder-header { cursor: pointer; user-select: none; padding: 12px 15px; background: var(--card-bg); border-radius: 8px; margin: 0 0 10px; border-left: 5px solid var(--primary-color); display: flex; align-items: center; justify-content: space-between; font-size: 1.1rem; box-shadow: 0 1px 3px rgba(0,0,0,0.1); transition: background 0.2s; }
+    .folder-header:hover { background: var(--bg-color); }
+    .folder-header::after { content: "▼"; font-size: 0.8rem; transition: transform 0.3s; }
+    .folder-header.closed::after { transform: rotate(-90deg); }
+    .folder-content.closed { display: none; }
+    
+    .set-preview-container { background: var(--bg-color); border: 1px solid var(--border-color); border-radius: 8px; padding: 10px; margin-top: 10px; max-height: 250px; overflow-y: auto; font-size: 0.9rem; text-align: left;}
+    .set-preview-item { border-bottom: 1px solid var(--border-color); padding: 6px 0; }
+    .set-preview-item:last-child { border-bottom: none; }
+
+    .menu { display: grid; gap: 15px; grid-template-columns: 1fr; margin-top: 20px; }
+    @media (min-width: 600px) { .menu { grid-template-columns: 1fr 1fr; } }
+    .menu-btn { font-size: 1.1rem; padding: 20px; flex-direction: row; gap: 10px; }
+
+    .card-area { background: var(--card-bg); padding: 20px; border-radius: 16px; box-shadow: var(--shadow); margin: 20px 0; height: 420px; overflow-y: auto; text-align: center; display: flex; flex-direction: column; }
+    .card-top-row { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 10px; flex-wrap: wrap; gap: 10px;}
+    #card-question { font-size: 2rem; margin: auto 0; }
+    
+    .session-header { display: flex; justify-content: space-between; font-weight: bold; padding: 0 10px; font-size: 1.1rem; }
+    .session-controls { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr 1fr; gap: 8px; }
+    .badge { display: inline-block; padding: 6px 12px; font-size: 0.85rem; background: var(--border-color); border-radius: 20px; margin: 0 4px; }
+    #user-answer-input { width: 100%; padding: 12px; margin: 15px 0; font-size: 1.2rem; border: 2px solid var(--border-color); border-radius: 8px; text-align: center; display: block; background: var(--bg-color); color: var(--text-color); }
+
+    .table-responsive { overflow-x: auto; margin-bottom: 20px; border-radius: 8px; box-shadow: var(--shadow); }
+    table { width: 100%; border-collapse: collapse; min-width: 700px; background: var(--card-bg); }
+    th, td { border: 1px solid var(--border-color); padding: 10px; text-align: left; font-size: 0.95rem; vertical-align: middle; }
+    th { background: var(--bg-color); position: sticky; top: 0; z-index: 1;}
+
+    .config-form label { display: block; margin-bottom: 10px; font-weight: bold; }
+    .config-form select, .config-form input[type="file"] { width: 100%; padding: 10px; margin-top: 5px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--card-bg); color: var(--text-color); font-size: 1rem; }
+    .settings-section { margin-bottom: 20px; padding: 20px; background: var(--card-bg); border-radius: 12px; box-shadow: var(--shadow); }
+    
+    .checkbox-group { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 5px; margin-bottom: 15px; }
+    .checkbox-label { display: flex; align-items: center; gap: 5px; background: var(--bg-color); padding: 5px 10px; border-radius: 20px; font-size: 0.9rem; cursor: pointer; border: 1px solid var(--border-color); }
+    .checkbox-label:hover { border-color: var(--primary-color); }
+    
+    .radio-group { display: flex; flex-direction: column; gap: 10px; margin-bottom: 15px; }
+    .radio-label { display: flex; align-items: center; gap: 8px; cursor: pointer; font-weight: normal; }
+    .target-count-box { background: var(--primary-color); color: white; padding: 10px; border-radius: 8px; text-align: center; font-size: 1.1rem; font-weight: bold; margin-bottom: 20px; }
+
+    .stat-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 20px; }
+    .stat-card { background: var(--card-bg); padding: 20px; border-radius: 12px; box-shadow: var(--shadow); text-align: center; }
+    .stat-card h4 { margin: 0 0 10px; font-size: 1rem; color: #6b7280; }
+    .stat-card .value { font-size: 1.8rem; font-weight: bold; color: var(--primary-color); }
+
+    .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); align-items: center; justify-content: center; z-index: 1000; padding: 20px; }
+    .modal.active { display: flex; }
+    .modal-content { background: var(--card-bg); padding: 30px; border-radius: 16px; text-align: center; max-width: 400px; width: 100%; box-shadow: var(--shadow); max-height: 90vh; overflow-y: auto;}
+    .modal-actions { display: flex; gap: 10px; justify-content: center; margin-top: 20px; }
+    
+    .mapping-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; font-size: 0.95rem; }
+    .mapping-label { font-weight: bold; width: 40%; text-align: right; padding-right: 15px; }
+    .mapping-select { width: 60%; padding: 6px; border-radius: 6px; border: 1px solid var(--border-color); background: var(--bg-color); color: var(--text-color); }
+  </style>
 </head>
-<body>
+<body data-theme="light">
 
-<!-- ログイン画面 -->
-<div id="login-screen" class="login-overlay">
-    <div class="card text-center" style="max-width: 320px; width: 90%;">
-        <div style="font-size: 3rem; margin-bottom: 10px;">🔐</div>
-        <h2>LifeOS Pro Max</h2>
-        <p style="font-size:0.8rem; color:var(--gray); margin-bottom: 20px;">SYSTEM AUTHENTICATION</p>
-        <button id="btn-login" class="btn-primary" style="padding: 12px; font-size: 1rem;">Googleでログイン</button>
-    </div>
-</div>
+  <div id="screen-home" class="screen active">
+    <h1>暗記カード学習アプリ</h1>
 
-<!-- アプリ本体 -->
-<div id="app-screen" style="display: none;">
-    <div class="bottom-nav">
-        <div class="nav-item active" data-target="view-today"><div class="nav-icon">📝</div>今日</div>
-        <div class="nav-item" data-target="view-calendar"><div class="nav-icon">📅</div>カレンダー</div>
-        <div class="nav-item" data-target="view-finance"><div class="nav-icon">¥</div>家計</div>
-        <div class="nav-item" data-target="view-memo"><div class="nav-icon">📚</div>メモ</div>
-        <div class="nav-item" data-target="view-settings"><div class="nav-icon">⚙️</div>設定</div>
+    <!-- サマリー表示 -->
+    <div class="home-summary" id="home-data-summary" style="display: none;">
+      <div style="text-align:center;">データを読み込んでいます...</div>
     </div>
 
-    <div class="main-container">
-        
-        <!-- タブ1: 今日 -->
-        <div id="view-today" class="view active">
-            <div class="flex date-nav">
-                <button id="btn-prev-day" class="btn-sub circle">◀</button>
-                <input type="date" id="input-date" class="date-display">
-                <button id="btn-next-day" class="btn-sub circle">▶</button>
-            </div>
-
-            <div class="card today-summary-card">
-                <div class="summary-block">
-                    <div class="summary-label">今日の利用額 (ご飯 ＋ 変動費)</div>
-                    <div id="today-total" class="summary-total">¥0</div>
-                </div>
-                <div class="summary-divider"></div>
-                <div class="summary-block">
-                    <div class="summary-label">内訳</div>
-                    <div id="today-breakdown" class="summary-breakdown">ご飯: ¥0 / その他: ¥0</div>
-                </div>
-            </div>
-
-            <div class="grid-layout">
-                <div class="col">
-                    <div class="card">
-                        <h2>🍚 今日のご飯管理</h2>
-                        <div id="meal-container"></div>
-                    </div>
-
-                    <div class="card">
-                        <h2>📝 タスク・リマインダー</h2>
-                        <div class="flex" style="margin-bottom:5px;">
-                            <select id="task-cat" style="width: 35%;">
-                                <option value="注意">注意</option>
-                                <option value="リマインダー">ﾘﾏｲﾝﾀﾞｰ</option>
-                                <option value="業務">業務</option>
-                                <option value="私用">私用</option>
-                            </select>
-                            <input type="text" id="task-text" placeholder="やるべきこと...">
-                        </div>
-                        <div class="flex" style="margin-bottom:10px;">
-                            <input type="date" id="task-date" style="flex:1; font-size:0.8rem;">
-                            <input type="time" id="task-time" style="width:80px; font-size:0.8rem;">
-                            <button id="btn-add-task" class="btn-primary" style="width:auto; padding:0 20px;">追加</button>
-                        </div>
-                        <div id="task-list"></div>
-                    </div>
-                </div>
-                
-                <div class="col">
-                    <div class="card">
-                        <h2 class="green">💡 今日のメモ</h2>
-                        <textarea id="today-memo" placeholder="今日起きたこと、パッと思いついたこと... (自動保存)"></textarea>
-                    </div>
-
-                    <div class="card" style="border-left: 3px solid var(--sub);">
-                        <h2 class="purple">🔔 近日中の予定・リマインダー</h2>
-                        <p style="font-size:0.75rem; color:var(--gray); margin-bottom:10px;">期限が設定されている未完了のタスク一覧</p>
-                        <div id="upcoming-reminders-list"></div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- タブ2: カレンダー -->
-        <div id="view-calendar" class="view">
-            <div class="grid-layout">
-                <div class="col">
-                    <div class="card">
-                        <div class="flex" style="justify-content:space-between; margin-bottom:10px;">
-                            <button id="cal-prev" class="btn-sub" style="width:auto;">◀ 先月</button>
-                            <h2 id="cal-title" style="margin:0;"></h2>
-                            <button id="cal-next" class="btn-sub" style="width:auto;">来月 ▶</button>
-                        </div>
-                        
-                        <div style="background: rgba(10,132,255,0.1); border: 1px solid var(--primary); padding:8px; border-radius:var(--radius); margin-bottom:10px;">
-                            <label class="flex" style="color:var(--text); font-weight:bold;">
-                                <input type="checkbox" id="toggle-cal-meal-mode" style="width:20px; height:20px;"> 🍚 食事一括入力モード
-                            </label>
-                            <div style="font-size:0.7rem; color:var(--gray); margin-top:4px;">タップで塗りつぶし / ダブルタップで取り消し(リセット)</div>
-                            <div id="cal-meal-toolbar" class="grid-3" style="display:none; margin-top:8px;">
-                                <select id="cal-bulk-bf"></select>
-                                <select id="cal-bulk-lu"></select>
-                                <select id="cal-bulk-di"></select>
-                            </div>
-                        </div>
-
-                        <div class="cal-grid" id="cal-header-row">
-                            <div class="cal-header">日</div><div class="cal-header">月</div><div class="cal-header">火</div><div class="cal-header">水</div><div class="cal-header">木</div><div class="cal-header">金</div><div class="cal-header">土</div>
-                        </div>
-                        <div class="cal-grid" id="cal-body"></div>
-                    </div>
-                </div>
-                <div class="col">
-                    <div class="card" id="cal-preview-container" style="display:none;">
-                        <div class="flex" style="justify-content:space-between;">
-                            <h2 id="preview-title" class="green"></h2>
-                            <button class="btn-outline" style="width:auto; padding:4px 10px; font-size:0.8rem;" onclick="window.jumpToDate(calSelectedDate); document.querySelector('[data-target=\'view-today\']').click();">その日を編集</button>
-                        </div>
-                        <div id="preview-content"></div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- タブ3: 家計・通信 -->
-        <div id="view-finance" class="view">
-            <div class="card" style="padding-bottom:5px;">
-                <div class="flex" style="justify-content:space-between;">
-                    <h2>¥ 家計・通信 管理</h2>
-                    <select id="fin-month-select" style="width:auto; font-weight:bold;"></select>
-                </div>
-                <button id="btn-show-annual" class="btn-outline" style="margin-top:10px;">📊 年間ダッシュボード</button>
-            </div>
-            <div id="finance-content"></div>
-        </div>
-
-        <!-- タブ4: メモ -->
-        <div id="view-memo" class="view">
-            <div class="grid-layout">
-                <div class="col">
-                    <div class="card">
-                        <h2>📝 新規メモ保存</h2>
-                        <input type="text" id="memo-title" placeholder="タイトル">
-                        <textarea id="memo-content" placeholder="マニュアルや手順などをストック..."></textarea>
-                        <button id="btn-save-memo" class="btn-primary">保存</button>
-                    </div>
-                </div>
-                <div class="col">
-                    <div class="card">
-                        <h2 class="green">🔍 ストックメモ検索</h2>
-                        <input type="text" id="memo-search" placeholder="検索キーワード...">
-                        <div id="memo-list" style="margin-top:15px;"></div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- タブ5: 設定 -->
-        <div id="view-settings" class="view">
-            <div class="grid-layout">
-                <div class="col">
-                    <div class="card" style="border-left: 4px solid var(--warn);">
-                        <h2 class="red">🎨 システム・テーマ設定</h2>
-                        <select id="settings-theme" style="font-weight:bold;">
-                            <option value="default">🌐 Standard (デフォルト)</option>
-                            <option value="nerv_magi">⚠️ NERV: MAGI (オレンジ明朝)</option>
-                            <option value="nerv_term">💻 NERV: Terminal (旧劇・グリーン等幅)</option>
-                        </select>
-                    </div>
-
-                    <div class="card">
-                        <h2>🍚 食事カテゴリー設定</h2>
-                        <div id="settings-meals"></div>
-                        <button id="btn-add-meal-cat" class="btn-sub" style="margin-top:10px;">＋ 食事カテゴリ追加</button>
-                    </div>
-
-                    <div class="card">
-                        <h2>🛠️ 変動費カテゴリ設定</h2>
-                        <div id="settings-categories"></div>
-                        <button id="btn-add-category" class="btn-sub" style="margin-top:10px;">＋ カテゴリ追加</button>
-                    </div>
-                </div>
-
-                <div class="col">
-                    <div class="card" style="border-left: 3px solid var(--purple);">
-                        <h2 class="purple">🔄 サブスクリプション管理</h2>
-                        <p style="font-size:0.75rem; color:var(--gray);">【今年の想定支出合計: <strong id="sub-annual-total" style="color:var(--warn); font-size:1rem;">¥0</strong>】</p>
-                        <div id="settings-subscriptions"></div>
-                        <button id="btn-add-subscription" class="btn-sub" style="margin-top:10px;">＋ サブスク追加</button>
-                    </div>
-
-                    <div class="card">
-                        <h2>💳 支払い方法の設定</h2>
-                        <div id="settings-payments-list"></div>
-                        <button id="btn-add-payment" class="btn-sub" style="margin-top:10px;">＋ 支払い方法追加</button>
-                    </div>
-
-                    <div class="card">
-                        <h2 class="red">🔒 アカウント・データ管理</h2>
-                        <button id="btn-logout" class="btn-sub" style="margin-bottom: 15px; border-color:var(--warn); color:var(--warn);">🚪 ログアウト</button>
-                        <div style="height:1px; background:#333; margin-bottom:15px;"></div>
-                        <button id="btn-export-all" class="btn-primary">全データをダウンロード</button>
-                        <input type="file" id="file-import" accept=".json" style="margin-top:10px;">
-                    </div>
-                </div>
-            </div>
-        </div>
+    <!-- メニュー -->
+    <div class="menu">
+      <button class="menu-btn main-menu-btn" data-target="config" data-entry="normal">📖 通常学習</button>
+      <button class="menu-btn main-menu-btn" data-target="config" data-entry="wrong">⚠️ 間違いを見直し</button>
+      <button class="menu-btn main-menu-btn" data-target="config" data-entry="weak">📉 苦手な問題</button>
+      <button class="menu-btn main-menu-btn" data-target="config" data-entry="stale">⏳ 最近未回答</button>
+      <button class="menu-btn main-menu-btn" id="btn-go-analytics" style="background: var(--success-color); color: white;">📊 学習分析</button>
+      <button class="menu-btn main-menu-btn" id="btn-go-list">📋 データ一覧</button>
+      <button class="menu-btn" data-target="settings">⚙️ アプリ設定</button>
     </div>
-</div>
+  </div>
 
-<!-- モーダル群 -->
-<div id="modal-expense" class="modal-overlay">
+  <div id="screen-list" class="screen" style="max-width: 1100px;">
+    <h2>📋 データ一覧 (設備分類別)</h2>
+    <div style="display: flex; justify-content: space-between; margin-bottom: 15px; flex-wrap: wrap; gap: 10px;">
+      <label>設備分類: <select id="list-category-filter" style="padding: 5px; border-radius: 5px;"><option value="all">すべて</option></select></label>
+      <span>合計: <strong id="list-total-count">0</strong> 件</span>
+    </div>
+    <div id="data-list-container"></div>
+    <div style="text-align: center; margin-top: 20px;"><button class="nav-home" style="flex-direction:row;">ホームに戻る</button></div>
+  </div>
+
+  <div id="screen-analytics" class="screen" style="max-width: 1000px;">
+    <h2>📊 学習分析レポート</h2>
+    <div class="stat-cards">
+      <div class="stat-card"><h4>全体進捗 (学習済み)</h4><div class="value" id="stat-progress">0 / 0</div></div>
+      <div class="stat-card"><h4>全体正答率</h4><div class="value" id="stat-accuracy">0%</div></div>
+    </div>
+    <div class="settings-section">
+      <h3 style="margin-top:0;">📂 設備分類ごとの正答率</h3>
+      <div class="table-responsive">
+        <table id="analytics-cat-table">
+          <thead><tr><th>設備分類</th><th>問題数</th><th>学習済</th><th>正答率</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="settings-section">
+      <h3 style="color: var(--danger-color); margin-top:0;">⚠️ 間違えた問題リスト (設備分類別)</h3>
+      <div id="analytics-wrong-container"></div>
+    </div>
+    <div style="text-align: center;"><button class="nav-home" style="flex-direction:row;">ホームに戻る</button></div>
+  </div>
+
+  <div id="screen-config" class="screen">
+    <h2>学習条件の設定</h2>
+    <div class="settings-section config-form">
+      <h3 style="margin-top: 0;">🔍 1. 出題の絞り込み</h3>
+      <label>自己評価マーク:</label>
+      <div id="filter-flags" class="checkbox-group">
+        <label class="checkbox-label"><input type="checkbox" value="uneasy" class="chk-flag"> 😰 不安</label>
+        <label class="checkbox-label"><input type="checkbox" value="mistake" class="chk-flag"> ⚠️ ミス注意</label>
+      </div>
+      <label>設備分類:</label>
+      <div id="filter-equipments" class="checkbox-group"></div>
+      
+      <div class="target-count-box" id="config-target-count-display">絞り込み対象: 計算中...</div>
+      <hr style="border: 0; border-top: 1px solid var(--border-color); margin: 20px 0;">
+
+      <h3 style="margin-top: 0;">🎯 2. 出題範囲の指定</h3>
+      <label>出題方法:</label>
+      <div class="radio-group">
+        <label class="radio-label"><input type="radio" name="extract-type" value="random" checked> 🎲 ランダムに抽出する</label>
+        <label class="radio-label"><input type="radio" name="extract-type" value="range"> 📑 区間（セット）を分けて順番に出題する</label>
+      </div>
+      <div id="config-opt-random">
+        <label>出題数:
+          <select id="config-count"><option value="all">すべて</option><option value="10">10問</option><option value="20">20問</option><option value="50">50問</option></select>
+        </label>
+      </div>
+      
+      <div id="config-opt-range" style="display:none; background: var(--bg-color); padding: 15px; border-radius: 8px;">
+        <label>1セットの区切り:
+          <select id="config-chunk-size"><option value="10">10問ずつ</option><option value="20" selected>20問ずつ</option><option value="50">50問ずつ</option><option value="100">100問ずつ</option></select>
+        </label>
+        <label>学習するセットを選択:
+          <select id="config-chunk-select"><option value="0">データがありません</option></select>
+        </label>
+        <label style="margin-top: 10px;">セット内の出題順序:
+          <select id="config-chunk-order">
+            <option value="normal" selected>順番通り (1, 2, 3...)</option>
+            <option value="random">ランダム</option>
+            <option value="reverse">逆順 (..., 3, 2, 1)</option>
+          </select>
+        </label>
+        <button id="btn-toggle-preview" style="width: 100%; margin-top: 15px; padding: 8px; font-size: 0.95rem; background: var(--card-bg); border: 1px solid var(--primary-color); border-radius: 6px; color: var(--primary-color); flex-direction:row; gap:5px;">👀 このセットの問題を確認する</button>
+        <div id="config-set-preview" class="set-preview-container" style="display: none;"></div>
+      </div>
+      <hr style="border: 0; border-top: 1px solid var(--border-color); margin: 20px 0;">
+
+      <label>学習モード:</label>
+      <select id="config-mode">
+        <option value="normal">通常 (略語 → 日本語)</option>
+        <option value="reverse">反転 (日本語 → 略語)</option>
+        <option value="rev1">Rev1 (略語表示 / 日本語入力)</option>
+        <option value="rev2">Rev2 (日本語表示 / 略語入力)</option>
+        <option value="test">テスト (ランダム・時間制限)</option>
+      </select>
+      <div style="display: flex; gap: 10px; margin-top: 25px;">
+        <button id="btn-start-session" class="primary-btn" style="flex:1; flex-direction:row;">スタート</button>
+        <button class="nav-home" style="flex:1; flex-direction:row;">戻る</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="screen-session" class="screen">
+    <div class="session-header">
+      <div>
+        <span id="session-progress">0 / 0</span>
+        <span id="session-correct-indicator" style="color: var(--success-color); margin-left: 15px; font-weight: bold;">✔ 0</span>
+      </div>
+      <span id="session-timer" style="display:none; color: var(--danger-color);">⏳ 00:00</span>
+    </div>
+    <div class="card-area">
+      <div class="card-top-row">
+        <div id="card-badges"><span id="badge-equipment" class="badge"></span><span id="badge-system" class="badge"></span></div>
+        <div id="card-flags" style="display:flex; gap:5px;">
+          <button class="flag-btn toggle-flag-btn" id="session-flag-uneasy" data-flag="uneasy" title="不安">😰 不安</button>
+          <button class="flag-btn toggle-flag-btn" id="session-flag-mistake" data-flag="mistake" title="間違えやすい">⚠️ ミス注意</button>
+        </div>
+      </div>
+      <h2 id="card-question"></h2>
+      <div id="card-input-section" style="display:none; width: 100%;">
+        <input type="text" id="user-answer-input" autocomplete="off" placeholder="答えを入力...">
+        <div id="judgment-result" style="font-size: 1.2rem; font-weight:bold; margin-bottom:10px;"></div>
+      </div>
+      <div id="card-details" style="display:none; background: var(--bg-color); padding: 15px; border-radius: 10px; margin-top: auto; text-align: left; width: 100%;">
+        <h3 id="card-answer" style="color:var(--primary-color); text-align: center; margin-top:0;"></h3>
+        <p style="margin:5px 0;"><strong>フルスペル:</strong> <span id="card-fullspell"></span></p>
+        <p style="margin:5px 0;"><strong>概略:</strong> <span id="card-outline"></span></p>
+        <p style="margin:5px 0;"><strong>概要:</strong> <span id="card-overview"></span></p>
+      </div>
+    </div>
+    <div class="session-controls">
+      <button id="btn-prev"><span>◀ 前へ</span><span class="shortcut-key">[1]</span></button>
+      <button id="btn-ans" class="primary-btn"><span>ANS判定</span><span class="shortcut-key">[2/Enter]</span></button>
+      <button id="btn-mark-correct" class="success-btn" title="正解にする"><span>✔</span><span class="shortcut-key">[3]</span></button>
+      <button id="btn-next"><span>次へ ▶</span><span class="shortcut-key">[4/Enter]</span></button>
+      <button id="btn-exit" class="danger-btn"><span>終了</span><span class="shortcut-key">[5]</span></button>
+    </div>
+  </div>
+
+  <div id="screen-result" class="screen">
+    <h2>学習結果</h2>
+    <div class="settings-section" style="text-align: center; font-size:1.5rem;">
+      <p>正解数: <strong id="res-correct" style="color:var(--success-color);">0</strong> / <span id="res-total">0</span></p>
+      <p>正解率: <strong id="res-accuracy" style="color:var(--primary-color);">0</strong>%</p>
+    </div>
+    
+    <div style="display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;">
+      <button id="btn-retry-session" class="primary-btn" style="flex-direction:row;">🔄 もう一度</button>
+      <button id="btn-review-wrong" class="warning-btn" style="display:none; flex-direction:row;">間違えた問題を復習</button>
+      <button class="nav-home" style="flex-direction:row;">ホームに戻る</button>
+    </div>
+  </div>
+
+  <div id="screen-settings" class="screen">
+    <h2>⚙️ アプリ設定</h2>
+    
+    <div class="settings-section">
+      <h3>① 問題データの追加・更新 (CSV)</h3>
+      <p style="font-size: 0.85rem; color: #666; margin-bottom:10px;">列名が違っても次の画面で割り当てを修正できます。</p>
+      <input type="file" id="csv-upload" accept=".csv">
+      <button id="btn-trigger-mapping" class="primary-btn" style="width:100%; margin-top:10px; flex-direction:row;">CSVを読み込む</button>
+      <p id="import-msg" style="text-align: center; font-weight: bold; margin-top: 10px;"></p>
+    </div>
+    
+    <div class="settings-section">
+      <h3>② データのバックアップ・復元</h3>
+      <div style="margin-bottom: 15px; text-align: left;">
+        <label style="display: flex; align-items: center; gap: 5px; cursor: pointer; margin-bottom: 10px;">
+          <!-- セキュリティ版で消していた「問題データを含める」を復活 -->
+          <input type="checkbox" id="backup-include-cards" checked>
+          問題データも含めて保存する
+        </label>
+        <button id="btn-export-backup" class="primary-btn" style="width:100%; flex-direction:row;">バックアップをダウンロード</button>
+      </div>
+      <hr style="border: 0; border-top: 1px solid var(--border-color); margin: 15px 0;">
+      <div style="text-align: left;">
+        <p style="font-size: 0.85rem; margin-bottom:5px; font-weight: bold;">バックアップファイルから復元</p>
+        <input type="file" id="backup-upload" accept=".json">
+        <button id="btn-import-backup" class="warning-btn" style="width:100%; margin-top:10px; flex-direction:row;">復元する</button>
+        <p id="backup-msg" style="text-align: center; font-weight: bold; margin-top: 10px;"></p>
+      </div>
+    </div>
+    <div class="settings-section">
+      <h3>データのリセット</h3>
+      <div style="display: flex; flex-direction: column; gap: 10px;">
+        <button id="btn-reset-history" class="warning-btn" style="flex-direction:row;">学習履歴のみリセット</button>
+        <button id="btn-reset-all" class="danger-btn" style="flex-direction:row;">全データ完全リセット</button>
+      </div>
+    </div>
+    <div class="settings-section">
+      <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+        <input type="checkbox" id="theme-toggle" style="width:20px; height:20px;"> ダークモード
+      </label>
+    </div>
+    <div style="text-align: center;"><button class="nav-home" style="flex-direction:row;">ホームに戻る</button></div>
+  </div>
+
+  <div id="modal-csv-mapping" class="modal">
+    <div class="modal-content" style="max-width: 550px; text-align: left;">
+      <h3 style="text-align: center; margin-top:0;">CSV列の割り当て (マッピング)</h3>
+      <p style="font-size: 0.85rem; margin-bottom: 15px; color:#666;">
+        <span style="color:var(--danger-color);">※「略語」と「日本語」は必須です。</span>割り当てない項目は「（使用しない）」を選んでください。
+      </p>
+      <div id="csv-mapping-container" style="display: flex; flex-direction: column; gap: 10px;"></div>
+      <div class="modal-actions" style="margin-top: 25px;">
+        <button id="btn-execute-import" class="primary-btn" style="flex:1; flex-direction:row;">読み込み実行</button>
+        <button id="btn-cancel-import" style="flex:1; flex-direction:row;">キャンセル</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="modal-exit" class="modal">
     <div class="modal-content">
-        <h2>支出の詳細</h2>
-        <input type="hidden" id="exp-id"><input type="number" id="exp-date" placeholder="日付(日)"><input type="text" id="exp-name" placeholder="品名">
-        <input type="number" id="exp-amount" placeholder="金額"><div class="grid-2"><select id="exp-category"></select><select id="exp-payment"></select></div>
-        <input type="text" id="exp-tags" placeholder="タグ (カンマ区切り)">
-        <div class="flex" style="justify-content:space-around; margin:10px 0;"><span class="rating-star" data-val="1">😞 1</span><span class="rating-star" data-val="2">😐 2</span><span class="rating-star" data-val="3">🤩 3</span></div>
-        <input type="hidden" id="exp-rating" value="2">
-        <label class="flex"><input type="checkbox" id="exp-advance" style="width:20px; height:20px;"><span>立替フラグ</span></label>
-        <textarea id="exp-memo" placeholder="メモ"></textarea>
-        <div class="flex" style="margin-top:20px;"><button id="btn-close-expense" class="btn-sub">キャンセル</button><button id="btn-save-expense" class="btn-primary">保存</button></div>
+      <h3>本当に終了しますか？</h3>
+      <p>ここまでの記録は保存されます。</p>
+      <p style="font-size:0.85rem; color:#666;">[Enter/Y]: 終了　[Esc/N]: 戻る</p>
+      <div class="modal-actions"><button id="btn-modal-yes" class="primary-btn" style="flex-direction:row;">Yes (終了)</button><button id="btn-modal-no" style="flex-direction:row;">No (戻る)</button></div>
     </div>
-</div>
-<div id="modal-annual" class="modal-overlay"><div class="modal-content" style="max-width: 600px; width:95%;"><h2>📊 年間ダッシュボード</h2><select id="annual-year-select" style="margin-bottom:10px;"></select><div class="finance-val text-center" id="annual-total-balance" style="margin-bottom:20px;"></div><canvas id="annual-chart" style="max-height:300px;"></canvas><button id="btn-close-annual" class="btn-primary" style="margin-top:20px;">閉じる</button></div></div>
-<script src="app.js"></script>
+  </div>
+  <div id="modal-confirm" class="modal">
+    <div class="modal-content">
+      <h3 id="confirm-title" style="color: var(--danger-color);">確認</h3>
+      <div id="confirm-message">本当に実行しますか？</div>
+      <p style="font-size:0.85rem; color:#666; margin-top:10px;">[Enter/Y]: はい　[Esc/N]: キャンセル</p>
+      <div class="modal-actions"><button id="btn-confirm-yes" class="danger-btn" style="flex-direction:row;">はい</button><button id="btn-confirm-no" style="flex-direction:row;">キャンセル</button></div>
+    </div>
+  </div>
+
+  <script src="db.js"></script>
+  <script src="app.js"></script>
 </body>
 </html>
