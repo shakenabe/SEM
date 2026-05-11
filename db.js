@@ -2,11 +2,11 @@
 // データベース初期化 (IndexedDB)
 // ★ 通常版: cards(問題文)をPCに永続保存する仕様
 // ==========================================
-const DB_NAME = 'FlashcardAppDB';
-const DB_VERSION = 4; // バージョンを上げてcardsストアを再作成
+const DB_NAME = 'FlashcardAppDB_v2'; // DB名を変更して旧版との競合を回避
+const DB_VERSION = 5; // バージョンを更新
 
 let db;
-window.dbInitPromise = initDB().then(() => console.log('DB Initialized (Ver 4 - Cards Storage Restored)'));
+window.dbInitPromise = initDB().then(() => console.log(`DB Initialized (Ver ${DB_VERSION})`));
 
 function initDB() {
   return new Promise((resolve, reject) => {
@@ -15,7 +15,6 @@ function initDB() {
     request.onupgradeneeded = (e) => {
       const db = e.target.result;
       
-      // バージョンアップに伴い、ストアを確保
       if (!db.objectStoreNames.contains('cards')) {
         const cardsOS = db.createObjectStore('cards', { keyPath: 'id' });
         cardsOS.createIndex('equipmentCategory', 'equipmentCategory', { multiEntry: true });
@@ -24,10 +23,13 @@ function initDB() {
       if (!db.objectStoreNames.contains('progress')) {
         db.createObjectStore('progress', { keyPath: 'cardId' });
       }
-      if (!db.objectStoreNames.contains('attempts')) {
-        const attOS = db.createObjectStore('attempts', { keyPath: 'attemptId', autoIncrement: true });
-        attOS.createIndex('cardId', 'cardId', { unique: false });
+
+      if (db.objectStoreNames.contains('attempts')) {
+        db.deleteObjectStore('attempts');
       }
+      const attOS = db.createObjectStore('attempts', { keyPath: 'attemptId', autoIncrement: true });
+      attOS.createIndex('cardId', 'cardId', { unique: false });
+      attOS.createIndex('rating', 'rating', { unique: false }); // 評価で検索するためのインデックス
     };
 
     request.onsuccess = (e) => {
@@ -164,14 +166,17 @@ window.importBackup = async function(jsonString) {
     const tx = db.transaction(['cards', 'progress', 'attempts'], 'readwrite');
     if (data.cards && Array.isArray(data.cards)) {
       const cardsStore = tx.objectStore('cards');
+      cardsStore.clear(); // データをクリアしてからインポート
       data.cards.forEach(c => cardsStore.put(c));
     }
     if (data.progress && Array.isArray(data.progress)) {
       const progStore = tx.objectStore('progress');
+      progStore.clear();
       data.progress.forEach(p => progStore.put(p));
     }
     if (data.attempts && Array.isArray(data.attempts)) {
       const attStore = tx.objectStore('attempts');
+      attStore.clear();
       data.attempts.forEach(a => attStore.put(a));
     }
     tx.oncomplete = () => resolve();
