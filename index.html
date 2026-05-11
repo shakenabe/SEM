@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>暗記カード学習アプリ</title>
+  <title>暗記カード学習アプリ v2</title>
   <style>
     /* 共通変数・テーマ設定 */
     :root {
@@ -23,7 +23,6 @@
 
     * { box-sizing: border-box; }
     
-    /* セキュリティ制限(user-select: none 等)を完全撤廃 */
     body { 
       font-family: 'Helvetica Neue', Arial, sans-serif; 
       background-color: var(--bg-color); color: var(--text-color); margin: 0; padding: 15px; 
@@ -74,12 +73,14 @@
     @media (min-width: 600px) { .menu { grid-template-columns: 1fr 1fr; } }
     .menu-btn { font-size: 1.1rem; padding: 20px; flex-direction: row; gap: 10px; }
 
-    .card-area { background: var(--card-bg); padding: 20px; border-radius: 16px; box-shadow: var(--shadow); margin: 20px 0; height: 420px; overflow-y: auto; text-align: center; display: flex; flex-direction: column; }
+    .card-area { background: var(--card-bg); padding: 20px; border-radius: 16px; box-shadow: var(--shadow); margin: 20px 0; height: 420px; overflow-y: auto; text-align: center; display: flex; flex-direction: column; position: relative; }
+    #judgment-icon { position: absolute; top: 15px; left: 15px; font-size: 3rem; animation: popIn 0.3s; }
+    @keyframes popIn { from { transform: scale(0.5); opacity: 0; } to { transform: scale(1); opacity: 1; }}
     .card-top-row { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 10px; flex-wrap: wrap; gap: 10px;}
     #card-question { font-size: 2rem; margin: auto 0; }
     
     .session-header { display: flex; justify-content: space-between; font-weight: bold; padding: 0 10px; font-size: 1.1rem; }
-    .session-controls { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr 1fr; gap: 8px; }
+    .session-controls { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 8px; }
     .badge { display: inline-block; padding: 6px 12px; font-size: 0.85rem; background: var(--border-color); border-radius: 20px; margin: 0 4px; }
     #user-answer-input { width: 100%; padding: 12px; margin: 15px 0; font-size: 1.2rem; border: 2px solid var(--border-color); border-radius: 8px; text-align: center; display: block; background: var(--bg-color); color: var(--text-color); }
 
@@ -89,7 +90,7 @@
     th { background: var(--bg-color); position: sticky; top: 0; z-index: 1;}
 
     .config-form label { display: block; margin-bottom: 10px; font-weight: bold; }
-    .config-form select, .config-form input[type="file"] { width: 100%; padding: 10px; margin-top: 5px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--card-bg); color: var(--text-color); font-size: 1rem; }
+    .config-form select, .config-form input[type="file"], .config-form input[type="number"] { width: 100%; padding: 10px; margin-top: 5px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--card-bg); color: var(--text-color); font-size: 1rem; }
     .settings-section { margin-bottom: 20px; padding: 20px; background: var(--card-bg); border-radius: 12px; box-shadow: var(--shadow); }
     
     .checkbox-group { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 5px; margin-bottom: 15px; }
@@ -100,10 +101,11 @@
     .radio-label { display: flex; align-items: center; gap: 8px; cursor: pointer; font-weight: normal; }
     .target-count-box { background: var(--primary-color); color: white; padding: 10px; border-radius: 8px; text-align: center; font-size: 1.1rem; font-weight: bold; margin-bottom: 20px; }
 
-    .stat-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 20px; }
-    .stat-card { background: var(--card-bg); padding: 20px; border-radius: 12px; box-shadow: var(--shadow); text-align: center; }
-    .stat-card h4 { margin: 0 0 10px; font-size: 1rem; color: #6b7280; }
-    .stat-card .value { font-size: 1.8rem; font-weight: bold; color: var(--primary-color); }
+    .history-item { background: var(--card-bg); padding: 15px; border-radius: 8px; margin-bottom: 12px; border-left: 5px solid var(--primary-color); display: grid; grid-template-columns: 50px 1fr; gap: 15px; align-items: center; }
+    .history-icon { font-size: 2rem; text-align: center; }
+    .history-details { font-size: 0.9rem; }
+    .history-details strong { font-size: 1.1rem; color: var(--text-color); }
+    .history-meta { color: #6b7280; font-size: 0.85rem; }
 
     .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); align-items: center; justify-content: center; z-index: 1000; padding: 20px; }
     .modal.active { display: flex; }
@@ -128,10 +130,8 @@
     <!-- メニュー -->
     <div class="menu">
       <button class="menu-btn main-menu-btn" data-target="config" data-entry="normal">📖 通常学習</button>
-      <button class="menu-btn main-menu-btn" data-target="config" data-entry="wrong">⚠️ 間違いを見直し</button>
-      <button class="menu-btn main-menu-btn" data-target="config" data-entry="weak">📉 苦手な問題</button>
-      <button class="menu-btn main-menu-btn" data-target="config" data-entry="stale">⏳ 最近未回答</button>
-      <button class="menu-btn main-menu-btn" id="btn-go-analytics" style="background: var(--success-color); color: white;">📊 学習分析</button>
+      <button class="menu-btn main-menu-btn" data-target="config" data-entry="weak_list">📉 苦手なリスト</button>
+      <button class="menu-btn main-menu-btn" id="btn-go-analytics" style="background: var(--success-color); color: white;">📊 学習履歴</button>
       <button class="menu-btn main-menu-btn" id="btn-go-list">📋 データ一覧</button>
       <button class="menu-btn" data-target="settings">⚙️ アプリ設定</button>
     </div>
@@ -147,32 +147,26 @@
     <div style="text-align: center; margin-top: 20px;"><button class="nav-home" style="flex-direction:row;">ホームに戻る</button></div>
   </div>
 
-  <div id="screen-analytics" class="screen" style="max-width: 1000px;">
-    <h2>📊 学習分析レポート</h2>
-    <div class="stat-cards">
-      <div class="stat-card"><h4>全体進捗 (学習済み)</h4><div class="value" id="stat-progress">0 / 0</div></div>
-      <div class="stat-card"><h4>全体正答率</h4><div class="value" id="stat-accuracy">0%</div></div>
-    </div>
-    <div class="settings-section">
-      <h3 style="margin-top:0;">📂 設備分類ごとの正答率</h3>
-      <div class="table-responsive">
-        <table id="analytics-cat-table">
-          <thead><tr><th>設備分類</th><th>問題数</th><th>学習済</th><th>正答率</th></tr></thead>
-          <tbody></tbody>
-        </table>
-      </div>
-    </div>
-    <div class="settings-section">
-      <h3 style="color: var(--danger-color); margin-top:0;">⚠️ 間違えた問題リスト (設備分類別)</h3>
-      <div id="analytics-wrong-container"></div>
-    </div>
-    <div style="text-align: center;"><button class="nav-home" style="flex-direction:row;">ホームに戻る</button></div>
+  <div id="screen-analytics" class="screen">
+    <h2>📊 学習履歴</h2>
+    <div id="analytics-history-container"><p style="text-align:center; padding:20px;">学習履歴がありません。</p></div>
+    <div style="text-align: center; margin-top:20px;"><button class="nav-home" style="flex-direction:row;">ホームに戻る</button></div>
   </div>
 
   <div id="screen-config" class="screen">
     <h2>学習条件の設定</h2>
     <div class="settings-section config-form">
       <h3 style="margin-top: 0;">🔍 1. 出題の絞り込み</h3>
+      
+      <div id="config-opt-weak-list" style="display:none; margin-bottom: 15px; background: var(--bg-color); padding: 15px; border-radius: 8px;">
+        <label>苦手フィルター:</label>
+        <select id="config-weak-filter">
+          <option value="x_only">評価「X」のみ</option>
+          <option value="ox">評価「〇」と「X」</option>
+          <option value="o_only">評価「〇」のみ</option>
+        </select>
+      </div>
+
       <label>自己評価マーク:</label>
       <div id="filter-flags" class="checkbox-group">
         <label class="checkbox-label"><input type="checkbox" value="uneasy" class="chk-flag"> 😰 不安</label>
@@ -197,8 +191,8 @@
       </div>
       
       <div id="config-opt-range" style="display:none; background: var(--bg-color); padding: 15px; border-radius: 8px;">
-        <label>1セットの区切り:
-          <select id="config-chunk-size"><option value="10">10問ずつ</option><option value="20" selected>20問ずつ</option><option value="50">50問ずつ</option><option value="100">100問ずつ</option></select>
+        <label>1セットの区切り (問):
+            <input type="number" id="config-chunk-size" value="20" min="1" style="width: 100%;">
         </label>
         <label>学習するセットを選択:
           <select id="config-chunk-select"><option value="0">データがありません</option></select>
@@ -219,9 +213,6 @@
       <select id="config-mode">
         <option value="normal">通常 (略語 → 日本語)</option>
         <option value="reverse">反転 (日本語 → 略語)</option>
-        <option value="rev1">Rev1 (略語表示 / 日本語入力)</option>
-        <option value="rev2">Rev2 (日本語表示 / 略語入力)</option>
-        <option value="test">テスト (ランダム・時間制限)</option>
       </select>
       <div style="display: flex; gap: 10px; margin-top: 25px;">
         <button id="btn-start-session" class="primary-btn" style="flex:1; flex-direction:row;">スタート</button>
@@ -236,9 +227,9 @@
         <span id="session-progress">0 / 0</span>
         <span id="session-correct-indicator" style="color: var(--success-color); margin-left: 15px; font-weight: bold;">✔ 0</span>
       </div>
-      <span id="session-timer" style="display:none; color: var(--danger-color);">⏳ 00:00</span>
     </div>
     <div class="card-area">
+      <div id="judgment-icon"></div>
       <div class="card-top-row">
         <div id="card-badges"><span id="badge-equipment" class="badge"></span><span id="badge-system" class="badge"></span></div>
         <div id="card-flags" style="display:flex; gap:5px;">
@@ -247,10 +238,6 @@
         </div>
       </div>
       <h2 id="card-question"></h2>
-      <div id="card-input-section" style="display:none; width: 100%;">
-        <input type="text" id="user-answer-input" autocomplete="off" placeholder="答えを入力...">
-        <div id="judgment-result" style="font-size: 1.2rem; font-weight:bold; margin-bottom:10px;"></div>
-      </div>
       <div id="card-details" style="display:none; background: var(--bg-color); padding: 15px; border-radius: 10px; margin-top: auto; text-align: left; width: 100%;">
         <h3 id="card-answer" style="color:var(--primary-color); text-align: center; margin-top:0;"></h3>
         <p style="margin:5px 0;"><strong>フルスペル:</strong> <span id="card-fullspell"></span></p>
@@ -261,10 +248,10 @@
     <div class="session-controls">
       <button id="btn-prev"><span>◀ 前へ</span><span class="shortcut-key">[1]</span></button>
       <button id="btn-ans" class="primary-btn"><span>ANS判定</span><span class="shortcut-key">[2/Enter]</span></button>
-      <button id="btn-mark-correct" class="success-btn" title="正解にする"><span>✔</span><span class="shortcut-key">[3]</span></button>
       <button id="btn-next"><span>次へ ▶</span><span class="shortcut-key">[4/Enter]</span></button>
       <button id="btn-exit" class="danger-btn"><span>終了</span><span class="shortcut-key">[5]</span></button>
     </div>
+     <div style="text-align:center; margin-top:10px; font-size:0.85rem; color:#666;">スペースキーで「X」評価になります</div>
   </div>
 
   <div id="screen-result" class="screen">
@@ -276,7 +263,6 @@
     
     <div style="display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;">
       <button id="btn-retry-session" class="primary-btn" style="flex-direction:row;">🔄 もう一度</button>
-      <button id="btn-review-wrong" class="warning-btn" style="display:none; flex-direction:row;">間違えた問題を復習</button>
       <button class="nav-home" style="flex-direction:row;">ホームに戻る</button>
     </div>
   </div>
@@ -296,7 +282,6 @@
       <h3>② データのバックアップ・復元</h3>
       <div style="margin-bottom: 15px; text-align: left;">
         <label style="display: flex; align-items: center; gap: 5px; cursor: pointer; margin-bottom: 10px;">
-          <!-- セキュリティ版で消していた「問題データを含める」を復活 -->
           <input type="checkbox" id="backup-include-cards" checked>
           問題データも含めて保存する
         </label>
