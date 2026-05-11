@@ -6,8 +6,8 @@ const AppState = {
   currentScreen: 'home',
   entryType: 'normal',
   session: {
-    cards:[], currentIndex: 0, mode: 'normal', 
-    startTime: 0, timerInterval: null, timeRemaining: 0, results:[]
+    cards:[], currentIndex: 0, mode: 'normal', cardStartTime: 0, 
+    results:[]
   },
   lastSession: null 
 };
@@ -100,11 +100,15 @@ async function updateHomeSummary() {
   if (cards.length === 0) {
     summaryEl.style.display = 'none';
     menuBtns.forEach(btn => btn.disabled = true);
+    document.getElementById('btn-go-analytics').disabled = true;
+    document.getElementById('btn-go-list').disabled = true;
     return;
   }
   
   summaryEl.style.display = 'block';
   menuBtns.forEach(btn => btn.disabled = false);
+  document.getElementById('btn-go-analytics').disabled = false;
+  document.getElementById('btn-go-list').disabled = false;
   
   const titleDiv = createEl('div', { className: 'home-summary-title', textContent: `登録済みの問題: ${cards.length} 問` });
   summaryEl.appendChild(titleDiv);
@@ -149,8 +153,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('btn-start-session').addEventListener('click', startSession);
   document.getElementById('btn-prev').addEventListener('click', () => navigateCard(-1));
   document.getElementById('btn-next').addEventListener('click', () => navigateCard(1));
-  document.getElementById('btn-ans').addEventListener('click', handleAnswer);
-  document.getElementById('btn-mark-correct').addEventListener('click', handleMarkCorrect);
+  document.getElementById('btn-ans').addEventListener('click', () => handleAnswer('ans'));
   
   document.getElementById('btn-exit').addEventListener('click', () => document.getElementById('modal-exit').classList.add('active'));
   document.getElementById('btn-modal-no').addEventListener('click', () => document.getElementById('modal-exit').classList.remove('active'));
@@ -160,11 +163,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   document.getElementById('btn-retry-session').addEventListener('click', retrySession);
-  document.getElementById('btn-review-wrong').addEventListener('click', async () => {
-    AppState.entryType = 'wrong';
-    await prepareConfigScreen();
-    showScreen('config');
-  });
 
   // 自己評価フラグ (トグル操作)
   document.addEventListener('click', (e) => {
@@ -202,20 +200,17 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   document.querySelectorAll('input[name="extract-type"]').forEach(radio => {
     radio.addEventListener('change', (e) => {
-      if (e.target.value === 'random') {
-        document.getElementById('config-opt-random').style.display = 'block';
-        document.getElementById('config-opt-range').style.display = 'none';
-      } else {
-        document.getElementById('config-opt-random').style.display = 'none';
-        document.getElementById('config-opt-range').style.display = 'block';
-      }
+      const isRandom = e.target.value === 'random';
+      document.getElementById('config-opt-random').style.display = isRandom ? 'block' : 'none';
+      document.getElementById('config-opt-range').style.display = isRandom ? 'none' : 'block';
       document.getElementById('config-set-preview').style.display = 'none';
     });
   });
 
   document.querySelector('.config-form').addEventListener('change', (e) => {
+    const targetId = e.target.id;
     if (e.target.classList.contains('chk-flag') || e.target.classList.contains('chk-eq') || 
-        e.target.id === 'config-span' || e.target.id === 'config-chunk-size') {
+        targetId === 'config-weak-filter' || targetId === 'config-chunk-size') {
       updateConfigPreview();
     }
   });
@@ -228,7 +223,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const chunkSize = parseInt(document.getElementById('config-chunk-size').value);
     const chunkIndex = parseInt(document.getElementById('config-chunk-select').value);
     
-    if (!isNaN(chunkIndex)) {
+    if (!isNaN(chunkIndex) && chunkSize > 0) {
       const start = chunkIndex * chunkSize;
       const end = start + chunkSize;
       cards = cards.slice(start, end);
@@ -335,7 +330,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('modal-csv-mapping').classList.remove('active');
     
     try {
-      // IndexedDBへ保存
       const result = await window.importCSV(currentCsvText, mapping);
       const msgText = `✅ 成功！ 更新・追加: ${result.updated}件 / 古い問題の削除: ${result.deleted}件`;
       if(msgEl) { msgEl.style.color = "var(--success-color)"; msgEl.textContent = msgText; }
@@ -372,13 +366,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     const reader = new FileReader();
     reader.onload = async (e) => {
       try {
-        const jsonStr = e.target.result; const backupData = JSON.parse(jsonStr);
-        const lastTime = parseInt(localStorage.getItem('lastBackupTimestamp') || localStorage.getItem('lastDataUpdate') || '0', 10);
-        if (lastTime > 0 && backupData.timestamp < lastTime) {
-          if (!await confirmAction('⚠️ 警告: 古いバックアップです', '前回保存した時より古いデータです。\n本当に復元しますか？')) return;
-        } else {
-          if (!await confirmAction('バックアップの復元', '現在のデータが上書きされます。\n実行してよろしいですか？')) return;
-        }
+        const jsonStr = e.target.result;
+        if (!await confirmAction('バックアップの復元', '現在のデータがすべて上書きされます。\n実行してよろしいですか？')) return;
+        
         await window.importBackup(jsonStr);
         localStorage.setItem('lastDataUpdate', Date.now().toString());
         msg.style.color = "var(--success-color)"; msg.textContent = "復元が完了しました！";
@@ -389,7 +379,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   document.getElementById('btn-reset-history').addEventListener('click', async () => {
-    if(await confirmAction('学習履歴のリセット', '間違えた問題などの履歴のみを削除しますか？')) {
+    if(await confirmAction('学習履歴のリセット', '評価や正解・不正解の履歴のみを削除しますか？')) {
       await window.clearStore('progress'); await window.clearStore('attempts'); alert('履歴をリセットしました。');
     }
   });
@@ -429,12 +419,8 @@ document.addEventListener('keydown', (e) => {
   }
 
   if (AppState.currentScreen === 'result') {
-    if (e.key === 'Enter') {
+    if (e.key === 'Enter' || e.key.toLowerCase() === 'r') {
       e.preventDefault(); document.getElementById('btn-retry-session').click();
-    } else if (e.key.toLowerCase() === 'r') {
-      e.preventDefault(); 
-      const btnR = document.getElementById('btn-review-wrong');
-      if(btnR.style.display !== 'none') btnR.click();
     } else if (e.key.toLowerCase() === 'h') {
       e.preventDefault(); showScreen('home');
     }
@@ -444,7 +430,6 @@ document.addEventListener('keydown', (e) => {
   if (AppState.currentScreen !== 'session') return;
 
   const state = AppState.session.results[AppState.session.currentIndex];
-  const isInputFocused = document.activeElement && document.activeElement.id === 'user-answer-input';
 
   if (e.key === 'Enter') {
     e.preventDefault(); 
@@ -453,12 +438,15 @@ document.addEventListener('keydown', (e) => {
     return;
   }
   
-  if (isInputFocused) return;
+  if (e.key === ' ') { // Spacebar for 'X'
+      e.preventDefault();
+      if (!state.judged) handleAnswer('space');
+      return;
+  }
 
   switch (e.key) {
     case '1': document.getElementById('btn-prev').click(); break;
     case '2': document.getElementById('btn-ans').click(); break;
-    case '3': document.getElementById('btn-mark-correct').click(); break;
     case '4': document.getElementById('btn-next').click(); break;
     case '5': document.getElementById('btn-exit').click(); break;
   }
@@ -477,7 +465,7 @@ async function renderListScreen() {
   
   clearEl(select);
   select.appendChild(createEl('option', { value: 'all', textContent: 'すべて' }));
-  categories.forEach(cat => { select.appendChild(createEl('option', { value: cat, textContent: cat })); });
+  Array.from(categories).sort().forEach(cat => { select.appendChild(createEl('option', { value: cat, textContent: cat })); });
   if(!select.onchange) select.addEventListener('change', renderListTable);
   
   await renderListTable();
@@ -563,114 +551,50 @@ async function renderListTable() {
 }
 
 // ==========================================
-// 📊 学習分析・間違えた問題リスト
+// 📊 学習分析・履歴画面
 // ==========================================
 async function renderAnalyticsScreen() {
-  const cards = await getAllFromStore('cards');
-  const progress = await getAllFromStore('progress');
-  const progMap = new Map(progress.map(p =>[p.cardId, p]));
-
-  let learnedCards = 0; let totalCorrect = 0; let totalWrong = 0;
-  let statsMap = {}; 
-
-  cards.forEach(c => {
-    (c.equipmentCategory ||[]).forEach(eq => {
-      const id = 'e_' + eq;
-      if (!statsMap[id]) statsMap[id] = { name: eq, total: 0, learned: 0, correct: 0, wrong: 0 };
-      statsMap[id].total++;
-    });
-  });
-
-  cards.forEach(c => {
-    const p = progMap.get(c.id);
-    if (p && (p.correctCount > 0 || p.wrongCount > 0)) {
-      learnedCards++;
-      totalCorrect += (p.correctCount || 0);
-      totalWrong += (p.wrongCount || 0);
-      (c.equipmentCategory ||[]).forEach(eq => {
-        statsMap['e_' + eq].learned++;
-        statsMap['e_' + eq].correct += p.correctCount || 0;
-        statsMap['e_' + eq].wrong += p.wrongCount || 0;
-      });
-    }
-  });
-
-  document.getElementById('stat-progress').textContent = `${learnedCards} / ${cards.length}`;
-  const acc = (totalCorrect + totalWrong > 0) ? Math.round((totalCorrect / (totalCorrect + totalWrong)) * 100) : 0;
-  document.getElementById('stat-accuracy').textContent = `${acc}%`;
-
-  const catTbody = document.querySelector('#analytics-cat-table tbody');
-  clearEl(catTbody);
-  Object.values(statsMap).forEach(stat => {
-    const statAcc = (stat.correct + stat.wrong > 0) ? Math.round((stat.correct / (stat.correct + stat.wrong)) * 100) : 0;
-    const tr = createEl('tr');
-    tr.appendChild(createEl('td', { textContent: stat.name }));
-    tr.appendChild(createEl('td', { textContent: stat.total }));
-    tr.appendChild(createEl('td', { textContent: stat.learned }));
-    tr.appendChild(createEl('td', { style: `color:${statAcc < 60 ? 'var(--danger-color)' : 'inherit'}; font-weight:bold;`, textContent: `${statAcc}%` }));
-    catTbody.appendChild(tr);
-  });
-
-  const container = document.getElementById('analytics-wrong-container');
+  const container = document.getElementById('analytics-history-container');
   clearEl(container);
-  const wrongCards = cards.filter(c => progMap.get(c.id) && progMap.get(c.id).wrongCount > 0);
 
-  if (wrongCards.length === 0) {
-    container.appendChild(createEl('p', { style: 'text-align:center; padding: 20px; background:var(--card-bg); border-radius:8px;', textContent: '間違えた問題はありません！🎉' }));
-  } else {
-    const grouped = {};
-    wrongCards.forEach(c => {
-      const eqs = (c.equipmentCategory && c.equipmentCategory.length > 0) ? c.equipmentCategory :['分類なし'];
-      eqs.forEach(eq => {
-        if(!grouped[eq]) grouped[eq] =[];
-        grouped[eq].push(c);
-      });
-    });
+  const attempts = await getAllFromStore('attempts');
+  const cards = await getAllFromStore('cards');
+  const cardMap = new Map(cards.map(c => [c.id, c]));
 
-    Object.keys(grouped).sort().forEach(eq => {
-      const gCards = grouped[eq];
-      gCards.sort((a, b) => progMap.get(b.id).wrongCount - progMap.get(a.id).wrongCount);
-      
-      const wrapper = createEl('div', { style: 'margin-bottom: 15px;' });
-      const header = createEl('div', { className: 'folder-header closed' });
-      header.appendChild(document.createTextNode(`📁 ${eq} `));
-      header.appendChild(createEl('span', { style: 'font-size:0.9rem; font-weight:normal;', textContent: `(${gCards.length}件)` }));
-      
-      const content = createEl('div', { className: 'folder-content table-responsive closed', style: 'margin-bottom: 0;' });
-      
-      const table = document.createElement('table');
-      const thead = createEl('thead');
-      const trH = createEl('tr');['マーク', '略語', '日本語', 'ミス回数', '対象号機'].forEach((t, i) => {
-        trH.appendChild(createEl('th', { style: i === 0 ? 'min-width: 90px;' : '', textContent: t }));
-      });
-      thead.appendChild(trH);
-      table.appendChild(thead);
-      
-      const tbody = createEl('tbody');
-      gCards.forEach(c => {
-        const p = progMap.get(c.id);
-        const uAct = p?.flags?.uneasy ? 'active' : '';
-        const mAct = p?.flags?.mistake ? 'active' : '';
-        const tr = createEl('tr');
-        
-        const tdBtns = createEl('td', { style: 'white-space: nowrap;' },[
-          createEl('button', { className: `flag-btn toggle-flag-btn ${uAct}`, dataset: { id: c.id, flag: 'uneasy' }, title: '不安', textContent: '😰' }),
-          document.createTextNode(' '),
-          createEl('button', { className: `flag-btn toggle-flag-btn ${mAct}`, dataset: { id: c.id, flag: 'mistake' }, title: 'ミス注意', textContent: '⚠️' })
-        ]);
-        tr.appendChild(tdBtns);
-        tr.appendChild(createEl('td', {},[createEl('strong', { textContent: c.abbr })]));
-        tr.appendChild(createEl('td', { textContent: c.ja }));
-        tr.appendChild(createEl('td', { style: 'color:var(--danger-color); font-weight:bold;', textContent: `${p.wrongCount}回` }));
-        tr.appendChild(createEl('td', { textContent: c.targetMachine || '-' }));
-        tbody.appendChild(tr);
-      });
-      table.appendChild(tbody);
-      content.appendChild(table); wrapper.appendChild(header); wrapper.appendChild(content); container.appendChild(wrapper);
-    });
+  if (attempts.length === 0) {
+    container.appendChild(createEl('p', { style: 'text-align:center; padding: 20px; background:var(--card-bg); border-radius:8px;', textContent: 'まだ学習履歴はありません。' }));
+    showScreen('analytics');
+    return;
   }
+
+  attempts.sort((a, b) => b.answeredAt - a.answeredAt); // 新しい順にソート
+
+  attempts.forEach(att => {
+    const card = cardMap.get(att.cardId);
+    if (!card) return;
+
+    let iconText = '';
+    if (att.rating === 'excellent') iconText = '◎';
+    else if (att.rating === 'good') iconText = '〇';
+    else if (att.rating === 'poor') iconText = '✕';
+    else iconText = att.result === 'correct' ? '✔️' : '❌'; // 旧データ用
+
+    const item = createEl('div', { className: 'history-item' }, [
+      createEl('div', { className: 'history-icon', textContent: iconText }),
+      createEl('div', { className: 'history-details' }, [
+        createEl('div', { className: 'history-card-info' }, [
+          createEl('strong', { textContent: `${card.abbr} ` }),
+          createEl('span', { textContent: `(${card.ja})` })
+        ]),
+        createEl('div', { className: 'history-meta', textContent: new Date(att.answeredAt).toLocaleString() })
+      ])
+    ]);
+    container.appendChild(item);
+  });
+
   showScreen('analytics');
 }
+
 
 // ==========================================
 // 🔍 設定画面＆プレビュー・出題セット生成
@@ -678,41 +602,40 @@ async function renderAnalyticsScreen() {
 async function getFilteredCards() {
   const allCards = await getAllFromStore('cards'); 
   const allProgress = await getAllFromStore('progress');
-  const allAttempts = await getAllFromStore('attempts');
   const progMap = new Map(allProgress.map(p =>[p.cardId, p]));
   let filtered =[];
 
   if (AppState.entryType === 'normal') {
     filtered = [...allCards]; 
-  } else if (AppState.entryType === 'wrong') {
-    filtered = allCards.filter(c => progMap.get(c.id)?.wrongCount > 0);
-    filtered.sort((a, b) => (progMap.get(b.id)?.lastWrongAt || 0) - (progMap.get(a.id)?.lastWrongAt || 0));
-  } else if (AppState.entryType === 'weak') {
-    const spanVal = document.getElementById('config-span')?.value || '30';
-    const cutoffDate = spanVal === 'all' ? 0 : Date.now() - (parseInt(spanVal) * 24 * 60 * 60 * 1000);
-    const weakStats = new Map(allCards.map(c =>[c.id, { wrongN: 0, attemptN: 0, lastResult: null }]));
+  } else if (AppState.entryType === 'weak_list') {
+    const filterType = document.getElementById('config-weak-filter').value;
+    const allAttempts = await getAllFromStore('attempts');
+    const targetCardIds = new Set();
     
+    // ratingに基づいてフィルタリング
     allAttempts.forEach(att => {
-      if (att.answeredAt >= cutoffDate && weakStats.has(att.cardId)) {
-        const stat = weakStats.get(att.cardId);
-        stat.attemptN++;
-        if (att.result === 'wrong') stat.wrongN++;
-        stat.lastResult = att.result;
-      }
+        if (filterType === 'x_only' && att.rating === 'poor') targetCardIds.add(att.cardId);
+        else if (filterType === 'o_only' && att.rating === 'good') targetCardIds.add(att.cardId);
+        else if (filterType === 'ox' && (att.rating === 'poor' || att.rating === 'good')) targetCardIds.add(att.cardId);
     });
 
-    filtered = allCards.filter(c => weakStats.get(c.id).attemptN > 0);
-    filtered.forEach(c => {
-      const s = weakStats.get(c.id);
-      const acc = s.attemptN > 0 ? (s.attemptN - s.wrongN) / s.attemptN : 0;
-      c._weakScore = (s.wrongN * 2) + (s.lastResult === 'wrong' ? 3 : 0) + (acc < 0.6 ? 2 : 0);
+    // 最新の履歴が対象になるようにソート
+    const attemptMap = new Map();
+    allAttempts.forEach(att => {
+        if (targetCardIds.has(att.cardId)) {
+            if (!attemptMap.has(att.cardId) || attemptMap.get(att.cardId).answeredAt < att.answeredAt) {
+                attemptMap.set(att.cardId, att);
+            }
+        }
     });
-    filtered.sort((a, b) => b._weakScore - a._weakScore);
-  } else if (AppState.entryType === 'stale') {
-    filtered = allCards.filter(c => progMap.get(c.id)?.correctCount > 0);
-    filtered.sort((a, b) => (progMap.get(a.id)?.lastAnsweredAt || 0) - (progMap.get(b.id)?.lastAnsweredAt || 0));
+
+    const sortedAttempts = Array.from(attemptMap.values()).sort((a,b) => b.answeredAt - a.answeredAt);
+    const sortedCardIds = sortedAttempts.map(att => att.cardId);
+
+    const cardMap = new Map(allCards.map(c => [c.id, c]));
+    filtered = sortedCardIds.map(id => cardMap.get(id)).filter(Boolean); // 存在しないカードを除外
   }
-
+  
   const checkedFlags = Array.from(document.querySelectorAll('.chk-flag:checked')).map(cb => cb.value);
   if (checkedFlags.length > 0) {
     filtered = filtered.filter(c => {
@@ -742,8 +665,8 @@ async function updateConfigPreview() {
   clearEl(chunkSelect);
   document.getElementById('config-set-preview').style.display = 'none';
   
-  if (filtered.length === 0) {
-    chunkSelect.appendChild(createEl('option', { value: '0', textContent: 'データがありません' }));
+  if (filtered.length === 0 || chunkSize <= 0) {
+    chunkSelect.appendChild(createEl('option', { value: '', textContent: 'データがありません' }));
     return;
   }
 
@@ -757,24 +680,14 @@ async function updateConfigPreview() {
 
 async function prepareConfigScreen() {
   const cards = await getAllFromStore('cards');
-  const configForm = document.querySelector('.config-form');
-  let spanSelect = document.getElementById('config-span');
   
-  if (AppState.entryType === 'weak') {
-    if (!spanSelect) {
-      const label = createEl('label', { id: 'label-config-span' },[
-        '集計期間: ',
-        createEl('select', { id: 'config-span' },[
-          createEl('option', { value: '30', textContent: '直近30日' }),
-          createEl('option', { value: '7', textContent: '直近7日' }),
-          createEl('option', { value: '90', textContent: '直近90日' }),
-          createEl('option', { value: 'all', textContent: '全期間' })
-        ])
-      ]);
-      configForm.insertBefore(label, document.getElementById('filter-flags').parentElement.previousElementSibling);
-    }
+  const weakOpt = document.getElementById('config-opt-weak-list');
+  const flagFilter = document.getElementById('filter-flags').parentElement;
+  
+  if (AppState.entryType === 'weak_list') {
+      weakOpt.style.display = 'block';
   } else {
-    if (spanSelect) document.getElementById('label-config-span').remove();
+      weakOpt.style.display = 'none';
   }
 
   const eqContainer = document.getElementById('filter-equipments');
@@ -783,7 +696,7 @@ async function prepareConfigScreen() {
     cards.forEach(c => {
       if (c.equipmentCategory) c.equipmentCategory.forEach(eq => eqSet.add(eq));
     });
-    eqSet.forEach(eq => {
+    Array.from(eqSet).sort().forEach(eq => {
       const lbl = createEl('label', { className: 'checkbox-label' },[
         createEl('input', { type: 'checkbox', value: eq, className: 'chk-eq' }),
         document.createTextNode(` ${eq}`)
@@ -791,6 +704,8 @@ async function prepareConfigScreen() {
       eqContainer.appendChild(lbl);
     });
   }
+  // チェックをリセット
+  document.querySelectorAll('.chk-flag, .chk-eq').forEach(chk => chk.checked = false);
   await updateConfigPreview();
 }
 
@@ -802,35 +717,58 @@ async function startSession() {
   let cards = await getFilteredCards();
   const extractType = document.querySelector('input[name="extract-type"]:checked').value;
 
-  if (extractType === 'random') {
+  // 常にシャッフルオプションを尊重する
+  const order = document.getElementById('config-chunk-order').value;
+  if (extractType === 'random' || order === 'random') {
     cards.sort(() => Math.random() - 0.5);
+  }
+
+  if (extractType === 'random') {
     const countSelect = document.getElementById('config-count').value;
     if (countSelect !== 'all') cards = cards.slice(0, parseInt(countSelect));
-  } else {
+  } else { // range
     const chunkSize = parseInt(document.getElementById('config-chunk-size').value);
     const chunkIndex = parseInt(document.getElementById('config-chunk-select').value);
-    if (!isNaN(chunkIndex)) {
+    if (!isNaN(chunkIndex) && chunkSize > 0) {
       const start = chunkIndex * chunkSize;
       const end = start + chunkSize;
       cards = cards.slice(start, end);
     } else {
       cards =[];
     }
-
-    const order = document.getElementById('config-chunk-order').value;
     if (order === 'reverse') cards.reverse();
-    if (order === 'random') cards.sort(() => Math.random() - 0.5);
   }
   
   if (cards.length === 0) return alert("条件・絞り込みに一致する問題がありません！");
 
-  AppState.lastSession = { cards: [...cards], mode };
+  AppState.lastSession = { 
+      cards: [...cards], 
+      mode, 
+      entryType: AppState.entryType,
+      // フォームの状態を保存
+      formState: {
+          extractType: document.querySelector('input[name="extract-type"]:checked').value,
+          randomCount: document.getElementById('config-count').value,
+          chunkSize: document.getElementById('config-chunk-size').value,
+          chunkIndex: document.getElementById('config-chunk-select').value,
+          chunkOrder: document.getElementById('config-chunk-order').value,
+      }
+  };
   initAndRunSession(cards, mode);
 }
 
-function retrySession() {
+async function retrySession() {
   if (!AppState.lastSession) return;
-  initAndRunSession([...AppState.lastSession.cards], AppState.lastSession.mode);
+  
+  let cards = [...AppState.lastSession.cards];
+  const lastState = AppState.lastSession.formState;
+
+  // 再シャッフル処理
+  if (lastState.extractType === 'random' || lastState.chunkOrder === 'random') {
+      cards.sort(() => Math.random() - 0.5);
+  }
+
+  initAndRunSession(cards, AppState.lastSession.mode);
 }
 
 function initAndRunSession(cardsArray, mode) {
@@ -838,23 +776,8 @@ function initAndRunSession(cardsArray, mode) {
   AppState.session.cards = cardsArray;
   AppState.session.currentIndex = 0;
   AppState.session.results = cardsArray.map(c => ({
-    cardId: c.id, judged: false, isCorrect: false, userInput: '', attemptId: null,
-    testType: mode === 'test' ? (Math.random() > 0.5 ? 'rev1' : 'rev2') : mode
+    cardId: c.id, judged: false, isCorrect: false, rating: null
   }));
-
-  if (mode === 'test') {
-    AppState.session.timeRemaining = cardsArray.length * 10;
-    document.getElementById('session-timer').style.display = 'inline';
-    if (AppState.session.timerInterval) clearInterval(AppState.session.timerInterval);
-    AppState.session.timerInterval = setInterval(() => {
-      AppState.session.timeRemaining--;
-      const tr = AppState.session.timeRemaining;
-      document.getElementById('session-timer').textContent = `⏳ ${String(Math.floor(tr/60)).padStart(2,'0')}:${String(tr%60).padStart(2,'0')}`;
-      if (tr <= 0) { clearInterval(AppState.session.timerInterval); alert("時間切れ！"); endSession(); }
-    }, 1000);
-  } else {
-    document.getElementById('session-timer').style.display = 'none';
-  }
 
   showScreen('session');
   renderCard();
@@ -869,10 +792,12 @@ function renderCard() {
   const s = AppState.session;
   const card = s.cards[s.currentIndex];
   const state = s.results[s.currentIndex];
-  const activeMode = s.mode === 'test' ? state.testType : s.mode;
+  const activeMode = s.mode;
 
   document.getElementById('session-progress').textContent = `${s.currentIndex + 1} / ${s.cards.length}`;
   updateSessionCorrectIndicator();
+  
+  clearEl(document.getElementById('judgment-icon'));
 
   document.getElementById('badge-equipment').textContent = card.equipmentCategory?.join(', ') || '分類なし';
   const sysBadge = document.getElementById('badge-system');
@@ -892,14 +817,10 @@ function renderCard() {
   };
 
   const qEl = document.getElementById('card-question');
-  const inputSec = document.getElementById('card-input-section');
-  const inputEl = document.getElementById('user-answer-input');
-  const judgeEl = document.getElementById('judgment-result');
   const detailsEl = document.getElementById('card-details');
   
   detailsEl.style.display = 'none';
-  clearEl(judgeEl);
-  qEl.textContent = (activeMode === 'normal' || activeMode === 'rev1') ? card.abbr : card.ja;
+  qEl.textContent = activeMode === 'normal' ? card.abbr : card.ja;
 
   document.getElementById('btn-prev').disabled = (s.currentIndex === 0);
   document.getElementById('btn-ans').disabled = state.judged;
@@ -914,71 +835,47 @@ function renderCard() {
     btnNext.appendChild(createEl('span', { className: 'shortcut-key', textContent: '[4 / Enter]' }));
   }
 
-  if (activeMode === 'rev1' || activeMode === 'rev2') {
-    inputSec.style.display = 'block';
-    inputEl.value = state.userInput;
-    inputEl.disabled = state.judged;
-    
-    if (state.judged) {
-      judgeEl.textContent = state.isCorrect ? "⭕ 正解！" : "❌ 不正解...";
-      judgeEl.style.color = state.isCorrect ? "var(--success-color)" : "var(--danger-color)";
+  if (state.judged) {
       showDetails(card, activeMode);
-    } else {
-      setTimeout(()=> inputEl.focus(), 50);
-    }
   } else {
-    inputSec.style.display = 'none';
-    if (state.judged) showDetails(card, activeMode);
+      AppState.session.cardStartTime = Date.now();
   }
 }
 
-async function handleAnswer() {
+async function handleAnswer(source = 'ans') {
   const s = AppState.session;
-  const card = s.cards[s.currentIndex];
   const state = s.results[s.currentIndex];
-  const activeMode = s.mode === 'test' ? state.testType : s.mode;
-
   if (state.judged) return;
 
-  if (activeMode === 'rev1' || activeMode === 'rev2') {
-    const inputVal = document.getElementById('user-answer-input').value;
-    const correctAns = activeMode === 'rev1' ? card.ja : card.abbr;
-    state.userInput = inputVal;
-    state.isCorrect = (normalizeString(inputVal) === normalizeString(correctAns));
+  const elapsedTime = Date.now() - s.cardStartTime;
+  let rating = 'poor';
+
+  if (source === 'space') {
+    rating = 'poor';
+    state.isCorrect = false;
+    document.getElementById('judgment-icon').textContent = '✕';
   } else {
-    state.isCorrect = false; 
-  }
-
-  state.judged = true;
-  state.attemptId = await saveAttempt(card.id, activeMode, state.isCorrect ? 'correct' : 'wrong');
-  renderCard();
-}
-
-async function handleMarkCorrect() {
-  const s = AppState.session;
-  const state = s.results[s.currentIndex];
-  const card = s.cards[s.currentIndex];
-  const activeMode = s.mode === 'test' ? state.testType : s.mode;
-
-  if (!state.judged) {
-    state.isCorrect = true;
-    state.judged = true;
-    if (activeMode === 'rev1') state.userInput = card.ja;
-    if (activeMode === 'rev2') state.userInput = card.abbr;
-    state.attemptId = await saveAttempt(card.id, activeMode, 'correct');
-    renderCard();
-  } else {
-    if (!state.isCorrect) {
-      state.isCorrect = true;
-      await overwriteToCorrect(card.id, state.attemptId);
-      renderCard();
+    state.isCorrect = true; 
+    if (elapsedTime <= 5000) {
+        rating = 'excellent';
+        document.getElementById('judgment-icon').textContent = '◎';
+    } else if (elapsedTime <= 15000) {
+        rating = 'good';
+        document.getElementById('judgment-icon').textContent = '〇';
+    } else {
+        document.getElementById('judgment-icon').textContent = '✕';
     }
   }
+
+  state.rating = rating;
+  state.judged = true;
+  await saveAttempt(s.cards[s.currentIndex].id, s.mode, state.isCorrect, rating, elapsedTime);
+  renderCard();
 }
 
 function showDetails(card, activeMode) {
   document.getElementById('card-details').style.display = 'block';
-  document.getElementById('card-answer').textContent = (activeMode === 'normal' || activeMode === 'rev1') ? card.ja : card.abbr;
+  document.getElementById('card-answer').textContent = activeMode === 'normal' ? card.ja : card.abbr;
   document.getElementById('card-fullspell').textContent = card.fullSpell || '-';
   document.getElementById('card-outline').textContent = card.outline || '-'; 
   document.getElementById('card-overview').textContent = card.overview || '-'; 
@@ -990,63 +887,40 @@ function navigateCard(direction) {
     document.getElementById('modal-exit').classList.add('active');
     return;
   }
-  s.currentIndex = Math.max(0, s.currentIndex + direction);
-  renderCard();
+  const newIndex = s.currentIndex + direction;
+  if (newIndex >= 0 && newIndex < s.cards.length) {
+      s.currentIndex = newIndex;
+      renderCard();
+  }
 }
 
-function saveAttempt(cardId, mode, resultStr) {
+function saveAttempt(cardId, mode, isCorrect, rating, elapsedTime) {
   return new Promise((resolve) => {
     const now = Date.now();
-    let attemptId = null;
-    const txAtt = db.transaction('attempts', 'readwrite');
-    const reqAdd = txAtt.objectStore('attempts').add({ cardId, mode, result: resultStr, answeredAt: now });
-    reqAdd.onsuccess = (e) => attemptId = e.target.result;
+    const tx = db.transaction(['attempts', 'progress'], 'readwrite');
+    const attStore = tx.objectStore('attempts');
+    const progStore = tx.objectStore('progress');
+    
+    const resultStr = isCorrect ? 'correct' : 'wrong';
+    attStore.add({ cardId, mode, result: resultStr, rating, elapsedTime, answeredAt: now });
 
-    const txProg = db.transaction('progress', 'readwrite');
-    const store = txProg.objectStore('progress');
-    const reqP = store.get(cardId);
+    const reqP = progStore.get(cardId);
     reqP.onsuccess = () => {
       let p = reqP.result || { cardId, correctCount: 0, wrongCount: 0 };
       p.lastAnsweredAt = now;
-      if (resultStr === 'correct') {
-        p.correctCount++; p.lastCorrectAt = now; p.streak = (p.streak || 0) + 1;
+      if (isCorrect) {
+        p.correctCount = (p.correctCount || 0) + 1;
       } else {
-        p.wrongCount++; p.lastWrongAt = now; p.streak = 0;
+        p.wrongCount = (p.wrongCount || 0) + 1;
       }
-      store.put(p);
+      progStore.put(p);
     };
-    txProg.oncomplete = () => resolve(attemptId);
-  });
-}
-
-function overwriteToCorrect(cardId, attemptId) {
-  return new Promise((resolve) => {
-    const now = Date.now();
-    if (attemptId) {
-      const txAtt = db.transaction('attempts', 'readwrite');
-      const storeAtt = txAtt.objectStore('attempts');
-      const req = storeAtt.get(attemptId);
-      req.onsuccess = () => { if (req.result) { req.result.result = 'correct'; storeAtt.put(req.result); } };
-    }
-
-    const txProg = db.transaction('progress', 'readwrite');
-    const storeProg = txProg.objectStore('progress');
-    const reqP = storeProg.get(cardId);
-    reqP.onsuccess = () => {
-      let p = reqP.result;
-      if (p && p.wrongCount > 0) {
-        p.wrongCount--; p.correctCount++;
-        p.lastCorrectAt = now; p.streak = (p.streak || 0) + 1;
-        storeProg.put(p);
-      }
-    };
-    txProg.oncomplete = () => resolve();
+    tx.oncomplete = () => resolve();
   });
 }
 
 function endSession() {
   const s = AppState.session;
-  if (s.timerInterval) clearInterval(s.timerInterval);
   
   const total = s.cards.length;
   const correctCount = s.results.filter(r => r.isCorrect).length;
@@ -1055,7 +929,6 @@ function endSession() {
   document.getElementById('res-correct').textContent = correctCount;
   document.getElementById('res-total').textContent = total;
   document.getElementById('res-accuracy').textContent = accuracy;
-  document.getElementById('btn-review-wrong').style.display = (total - correctCount > 0) ? 'flex' : 'none';
-
+  
   showScreen('result');
 }
